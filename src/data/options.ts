@@ -52,3 +52,27 @@ export const hostingStatusLabels: Record<HostingStatus, string> = {
 }
 
 export const DEFAULT_CURRENCY = 'AUD'
+
+/** Currencies offered in money forms. Only the 3-letter code is stored. */
+export const currencies: { value: string; label: string }[] = [
+  { value: 'INR', label: 'INR — Indian Rupee (₹)' },
+  { value: 'USD', label: 'USD — US Dollar ($)' },
+  { value: 'AED', label: 'AED — UAE Dirham' },
+  { value: 'AUD', label: 'AUD — Australian Dollar (A$)' },
+  { value: 'CAD', label: 'CAD — Canadian Dollar (C$)' },
+  { value: 'GBP', label: 'GBP — British Pound (£)' },
+  { value: 'EUR', label: 'EUR — Euro (€)' },
+  { value: 'SAR', label: 'SAR — Saudi Riyal' },
+  { value: 'OMR', label: 'OMR — Omani Rial' },
+  { value: 'MYR', label: 'MYR — Malaysian Ringgit' },
+  { value: 'SGD', label: 'SGD — Singapore Dollar (S$)' },
+  { value: 'KWD', label: 'KWD — Kuwaiti Dinar' },
+  { value: 'QAR', label: 'QAR — Qatari Riyal' },
+  { value: 'BHD', label: 'BHD — Bahraini Dinar' },
+  { value: 'LKR', label: 'LKR — Sri Lankan Rupee' },
+  { value: 'PKR', label: 'PKR — Pakistani Rupee' },
+  { value: 'JPY', label: 'JPY — Japanese Yen (¥)' },
+  { value: 'CNY', label: 'CNY — Chinese Yuan' },
+  { value: 'NZD', label: 'NZD — New Zealand Dollar (NZ$)' },
+  { value: 'CHF', label: 'CHF — Swiss Franc' },
+]

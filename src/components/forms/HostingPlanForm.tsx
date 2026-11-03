@@ -3,6 +3,7 @@ import { DEFAULT_CURRENCY, hostingStatuses } from '../../data/options'
 import { describeError, saveHostingPlan } from '../../lib/api'
 import type { Client, Domain, HostingPlan, HostingStatus } from '../../types/domain'
 import { formatMoney, matchesSearch, nullIfEmpty, parseAmount } from '../../utils/format'
+import { CurrencySelect } from '../CurrencySelect'
 import { Field, FormDialog } from '../FormDialog'
 
 interface HostingPlanFormProps {
@@ -39,7 +40,6 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
 
   const cost = parseAmount(hostingCost)
   const charge = parseAmount(clientCharge)
-  const code = currency.trim().toUpperCase()
   const margin = typeof cost === 'number' && typeof charge === 'number' ? charge - cost : null
 
   const planNames = useMemo(() => new Map(plans.map((p) => [p.id, p.planName])), [plans])
@@ -66,7 +66,6 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
     if (startDate && startDate > renewalDate) return setError('The renewal date must be on or after the start date.')
     if (cost === undefined) return setError('Hosting cost must be a positive amount, e.g. 120.00.')
     if (charge === undefined) return setError('Client charge must be a positive amount, e.g. 240.00.')
-    if (!/^[A-Z]{3}$/.test(code)) return setError('Currency must be a 3-letter code such as AUD or USD.')
 
     setError(null)
     setSubmitting(true)
@@ -80,7 +79,7 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
           renewal_date: renewalDate,
           hosting_cost: cost,
           client_charge: charge,
-          currency: code,
+          currency,
           auto_renew: autoRenew,
           status,
           notes: nullIfEmpty(notes),
@@ -158,7 +157,7 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
           required
         />
       </Field>
-      <Field label="Hosting cost" htmlFor="hosting-cost" hint="What the provider charges you">
+      <Field label="Hosting cost" htmlFor="hosting-cost" hint={`What the provider charges you, in ${currency}`}>
         <input
           id="hosting-cost"
           inputMode="decimal"
@@ -167,7 +166,7 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
           placeholder="0.00"
         />
       </Field>
-      <Field label="Client charge" htmlFor="hosting-charge" hint="What you bill the client">
+      <Field label="Client charge" htmlFor="hosting-charge" hint={`What you bill the client, in ${currency}`}>
         <input
           id="hosting-charge"
           inputMode="decimal"
@@ -179,16 +178,9 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
       <Field
         label="Currency"
         htmlFor="hosting-currency"
-        hint={margin !== null && /^[A-Z]{3}$/.test(code) ? `Margin: ${formatMoney(margin, code)}` : undefined}
+        hint={margin !== null ? `Margin: ${formatMoney(margin, currency)}` : undefined}
       >
-        <input
-          id="hosting-currency"
-          value={currency}
-          onChange={(e) => setCurrency(e.target.value)}
-          maxLength={3}
-          autoCapitalize="characters"
-          spellCheck={false}
-        />
+        <CurrencySelect id="hosting-currency" value={currency} onChange={setCurrency} />
       </Field>
       <div className="field field-checkbox">
         <label>
