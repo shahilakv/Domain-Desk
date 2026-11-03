@@ -95,3 +95,52 @@ export const fetchHostingerPreview = () => invoke<HostingerPreview>({ action: 'p
 
 export const importHostingerDomains = (domains: { name: string; ownershipType: OwnershipType }[]) =>
   invoke<HostingerImportResult>({ action: 'import', domains })
+
+/* Hosting plans (hosting orders + billing subscriptions + websites). */
+
+export type HostingMatch = 'new' | 'link' | 'update' | 'unchanged'
+export type DomainLinkState = 'link' | 'linked' | 'other_plan' | 'not_in_domaindesk'
+
+export interface HostingerHostingItem {
+  orderId: string
+  subscriptionId: string | null
+  planName: string
+  planCode: string | null
+  /** Raw Hostinger order status: active, suspended, deleting, deleted. */
+  orderStatus: string
+  subscriptionStatus: string | null
+  renewalDate: string | null
+  renewalPrice: number | null
+  currency: string | null
+  autoRenew: boolean | null
+  billingPeriod: string | null
+  match: HostingMatch
+  changes: string[]
+  notes: string[]
+  /** Fields Hostinger did not provide. */
+  missing: string[]
+  domains: { name: string; state: DomainLinkState; otherPlan?: string }[]
+  existing: { id: string; planName: string } | null
+}
+
+export interface HostingerHostingPreview {
+  fetchedAt: string
+  schemaReady: boolean
+  items: HostingerHostingItem[]
+  manualPlans: { id: string; planName: string; provider: string }[]
+  skipped: { entry: string; reason: string }[]
+  warnings: string[]
+}
+
+export type HostingImportOutcome = 'inserted' | 'linked' | 'updated' | 'unchanged' | 'failed'
+
+export interface HostingerHostingImportResult {
+  results: { orderId: string; planName: string; outcome: HostingImportOutcome; linkedDomains: number; message?: string }[]
+  summary: Record<HostingImportOutcome, number>
+  warnings: string[]
+}
+
+export const fetchHostingerHostingPreview = () => invoke<HostingerHostingPreview>({ action: 'hosting-preview' })
+
+export const importHostingerHosting = (plans: { orderId: string; linkPlanId: string | null }[]) =>
+  invoke<HostingerHostingImportResult>({ action: 'hosting-import', plans })

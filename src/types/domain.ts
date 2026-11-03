@@ -92,4 +92,8 @@ export interface HostingPlan {
   notes: string
   /** Names of the domains linked through domains.hosting_plan_id. */
   domainNames: string[]
+  /** Set when the plan is imported from (linked to) a Hostinger hosting order. */
+  hostingerOrderId: string | null
+  /** When the Hostinger import last updated the plan. */
+  lastSyncedAt: string | null
 }

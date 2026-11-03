@@ -1,4 +1,13 @@
-import { fetchPortfolio, HostingerError, type FetchLike, type HostingerDomain } from './hostinger.ts'
+import { fetchHostingAccounts, fetchPortfolio, HostingerError, type FetchLike, type HostingerDomain } from './hostinger.ts'
+import {
+  displayName,
+  planHostingAccount,
+  type DomainLink,
+  type DomainLinkState,
+  type ExistingHostingPlan,
+  type HostingMatch,
+  type SyncArgs,
+} from './hostingPlan.ts'
 import {
   DEFAULT_OWNERSHIP,
   indexExisting,
@@ -23,6 +32,12 @@ import {
  * POST { action: "import", domains: [{ name, ownershipType }] }
  *   → re-reads Hostinger (never trusts dates sent by the browser), then inserts
  *     or updates each selected domain independently and reports per-domain results.
+ * POST { action: "hosting-preview" }
+ *   → the account's hosting orders (with billing details and websites), each
+ *     matched against the user's hosting plans, with the changes an import would make.
+ * POST { action: "hosting-import", plans: [{ orderId, linkPlanId? }] }
+ *   → re-reads Hostinger, then saves each selected plan and its domain links
+ *     in one database transaction per plan (see hostingPlan.ts for the rules).
  */
 
 export interface DbError {
@@ -37,6 +52,15 @@ export interface DomainStore {
   insertDomain(userId: string, values: DomainInsert): Promise<void>
   /** Must match on both id and user_id and fail if no row was updated. */
   updateDomain(userId: string, id: string, values: DomainPatch): Promise<void>
+}
+
+/** Hosting plan access as the signed-in user (RLS applies). */
+export interface HostingStore {
+  /** Returns schemaReady=false when the Hostinger columns from the 20261105 migration don't exist yet. */
+  listHostingPlans(userId: string): Promise<{ rows: ExistingHostingPlan[]; schemaReady: boolean }>
+  listDomainLinks(userId: string): Promise<DomainLink[]>
+  /** Calls public.dd_sync_hostinger_plan: one transaction per plan. */
+  syncHostingPlan(args: SyncArgs): Promise<{ planId: string; outcome: string; linked: number }>
 }
 
 export interface HandlerDeps {
@@ -55,7 +79,48 @@ export interface HandlerDeps {
    */
   allowedUserIds: string[]
   store: DomainStore
+  /** Required for the hosting-* actions. */
+  hosting?: HostingStore
   now?: () => Date
+}
+
+export interface HostingPreviewItem {
+  orderId: string
+  subscriptionId: string | null
+  /** Billing name, or the plan code made readable. */
+  planName: string
+  planCode: string | null
+  orderStatus: string
+  subscriptionStatus: string | null
+  renewalDate: string | null
+  renewalPrice: number | null
+  currency: string | null
+  autoRenew: boolean | null
+  billingPeriod: string | null
+  match: HostingMatch
+  changes: string[]
+  notes: string[]
+  missing: string[]
+  domains: { name: string; state: DomainLinkState; otherPlan?: string }[]
+  existing: { id: string; planName: string } | null
+}
+
+export interface HostingPreviewResponse {
+  fetchedAt: string
+  schemaReady: boolean
+  items: HostingPreviewItem[]
+  /** Plans not yet linked to Hostinger, which an order can be linked to instead of creating a new plan. */
+  manualPlans: { id: string; planName: string; provider: string }[]
+  skipped: { entry: string; reason: string }[]
+  warnings: string[]
+}
+
+export type HostingImportOutcome = 'inserted' | 'linked' | 'updated' | 'unchanged' | 'failed'
+
+export interface HostingImportResponse {
+  results: { orderId: string; planName: string; outcome: HostingImportOutcome; linkedDomains: number; message?: string }[]
+  summary: Record<HostingImportOutcome, number>
+  warnings: string[]
 }
 
 export interface PreviewItem {
@@ -263,6 +328,186 @@ async function runImport(deps: HandlerDeps, token: string, userId: string, rawSe
   return json(200, body)
 }
 
+const MAX_HOSTING_IMPORT = 200
+const HOSTING_MIGRATION = '20261105000000_hostinger_hosting_sync.sql'
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function describeHostingDbError(error: unknown): string {
+  const code = (error as DbError)?.code
+  if (code === '42703' || code === 'PGRST204' || code === 'PGRST202' || code === '42883') {
+    return `Database is missing the Hostinger hosting columns. Run the ${HOSTING_MIGRATION} migration.`
+  }
+  if (code === '23505') return 'Already imported (duplicate skipped).'
+  if (code === 'P0002') return 'The hosting plan to link was not found, or is already linked to Hostinger.'
+  if (code === '23514') return 'The database rejected one of the values (e.g. renewal date before start date).'
+  return describeDbError(error)
+}
+
+interface HostingContext {
+  accounts: Awaited<ReturnType<typeof fetchHostingAccounts>>
+  plans: ExistingHostingPlan[]
+  schemaReady: boolean
+  byOrder: Map<string, ExistingHostingPlan>
+  manual: Map<string, ExistingHostingPlan>
+  planNames: Map<string, string>
+  domainsByName: Map<string, DomainLink>
+}
+
+async function loadHostingContext(hosting: HostingStore, deps: HandlerDeps, token: string, userId: string): Promise<HostingContext> {
+  const [accounts, plans, domains] = await Promise.all([
+    fetchHostingAccounts(deps.fetch, token),
+    hosting.listHostingPlans(userId),
+    hosting.listDomainLinks(userId),
+  ])
+  const byOrder = new Map<string, ExistingHostingPlan>()
+  const manual = new Map<string, ExistingHostingPlan>()
+  for (const p of plans.rows) {
+    if (p.hostinger_order_id) byOrder.set(p.hostinger_order_id, p)
+    else manual.set(p.id, p)
+  }
+  const domainsByName = new Map<string, DomainLink>()
+  for (const d of domains) {
+    const key = normalizeName(d.domain_name)
+    if (!domainsByName.has(key)) domainsByName.set(key, d)
+  }
+  return {
+    accounts,
+    plans: plans.rows,
+    schemaReady: plans.schemaReady,
+    byOrder,
+    manual,
+    planNames: new Map(plans.rows.map((p) => [p.id, p.plan_name])),
+    domainsByName,
+  }
+}
+
+async function hostingPreview(hosting: HostingStore, deps: HandlerDeps, token: string, userId: string): Promise<Response> {
+  const ctx = await loadHostingContext(hosting, deps, token, userId)
+  const items = ctx.accounts.accounts.map((account): HostingPreviewItem => {
+    const existing = ctx.byOrder.get(account.orderId)
+    const decision = planHostingAccount(account, existing, undefined, ctx.domainsByName, ctx.planNames)
+    return {
+      orderId: account.orderId,
+      subscriptionId: account.subscriptionId,
+      planName: displayName(account),
+      planCode: account.planCode,
+      orderStatus: account.orderStatus,
+      subscriptionStatus: account.subscriptionStatus,
+      renewalDate: account.renewalDate,
+      renewalPrice: account.renewalPrice,
+      currency: account.currency,
+      autoRenew: account.autoRenew,
+      billingPeriod: account.billingPeriod,
+      match: decision.kind,
+      changes: decision.changes,
+      notes: decision.notes,
+      missing: decision.missing,
+      domains: decision.domains,
+      existing: existing ? { id: existing.id, planName: existing.plan_name } : null,
+    }
+  })
+  const body: HostingPreviewResponse = {
+    fetchedAt: (deps.now?.() ?? new Date()).toISOString(),
+    schemaReady: ctx.schemaReady,
+    items,
+    manualPlans: [...ctx.manual.values()].map((p) => ({ id: p.id, planName: p.plan_name, provider: p.provider })),
+    skipped: ctx.accounts.skipped,
+    warnings: ctx.accounts.warnings,
+  }
+  return json(200, body)
+}
+
+interface HostingSelection {
+  orderId: string
+  linkPlanId: string | null
+}
+
+function parseHostingSelection(raw: unknown): HostingSelection[] | string {
+  if (!Array.isArray(raw) || raw.length === 0) return 'Select at least one hosting plan to import.'
+  if (raw.length > MAX_HOSTING_IMPORT) return `Import at most ${MAX_HOSTING_IMPORT} hosting plans at a time.`
+  const byOrder = new Map<string, HostingSelection>()
+  const linkTargets = new Set<string>()
+  for (const item of raw) {
+    const { orderId, linkPlanId } = (item ?? {}) as { orderId?: unknown; linkPlanId?: unknown }
+    if (typeof orderId !== 'string' || !/^\d{1,20}$/.test(orderId)) return 'Each selected plan needs a Hostinger order id.'
+    if (linkPlanId !== undefined && linkPlanId !== null && (typeof linkPlanId !== 'string' || !UUID_PATTERN.test(linkPlanId))) {
+      return `Invalid plan to link for order ${orderId}.`
+    }
+    const link = (linkPlanId as string | null | undefined) ?? null
+    if (link) {
+      if (linkTargets.has(link)) return 'Each existing plan can be linked to only one Hostinger order.'
+      linkTargets.add(link)
+    }
+    byOrder.set(orderId, { orderId, linkPlanId: link })
+  }
+  return [...byOrder.values()]
+}
+
+async function hostingImport(
+  hosting: HostingStore,
+  deps: HandlerDeps,
+  token: string,
+  userId: string,
+  rawSelection: unknown,
+): Promise<Response> {
+  const selection = parseHostingSelection(rawSelection)
+  if (typeof selection === 'string') return fail(400, 'invalid_request', selection)
+
+  const ctx = await loadHostingContext(hosting, deps, token, userId)
+  if (!ctx.schemaReady) {
+    return fail(409, 'schema_not_ready', `Run the ${HOSTING_MIGRATION} migration in Supabase before importing hosting plans.`)
+  }
+  const accounts = new Map(ctx.accounts.accounts.map((a) => [a.orderId, a]))
+
+  const results: HostingImportResponse['results'] = []
+  // Sequential on purpose: each plan is its own transaction, and a domain
+  // linked by one plan must not be offered to the next.
+  for (const { orderId, linkPlanId } of selection) {
+    const account = accounts.get(orderId)
+    if (!account) {
+      results.push({ orderId, planName: `Order ${orderId}`, outcome: 'failed', linkedDomains: 0, message: 'No longer in your Hostinger account.' })
+      continue
+    }
+    const planName = displayName(account)
+    const existing = ctx.byOrder.get(orderId)
+    const linkTo = !existing && linkPlanId ? ctx.manual.get(linkPlanId) : undefined
+    if (!existing && linkPlanId && !linkTo) {
+      results.push({ orderId, planName, outcome: 'failed', linkedDomains: 0, message: describeHostingDbError({ code: 'P0002' }) })
+      continue
+    }
+    const decision = planHostingAccount(account, existing, linkTo, ctx.domainsByName, ctx.planNames)
+    if (decision.kind === 'unchanged' || !decision.args) {
+      results.push({ orderId, planName, outcome: 'unchanged', linkedDomains: 0, message: 'Already up to date.' })
+      continue
+    }
+    try {
+      const saved = await hosting.syncHostingPlan(decision.args)
+      const outcome: HostingImportOutcome =
+        saved.outcome === 'inserted' || saved.outcome === 'linked' ? saved.outcome : 'updated'
+      results.push({ orderId, planName, outcome, linkedDomains: saved.linked, message: decision.changes.join('; ') || undefined })
+      // Domains linked here are no longer free for later plans in this run.
+      for (const id of decision.args.domainIds) {
+        for (const d of ctx.domainsByName.values()) if (d.id === id) d.hosting_plan_id = saved.planId
+      }
+      if (linkTo) ctx.manual.delete(linkTo.id)
+    } catch (error) {
+      const code = (error as DbError)?.code
+      results.push({
+        orderId,
+        planName,
+        outcome: code === '23505' ? 'unchanged' : 'failed',
+        linkedDomains: 0,
+        message: describeHostingDbError(error),
+      })
+    }
+  }
+
+  const summary: HostingImportResponse['summary'] = { inserted: 0, linked: 0, updated: 0, unchanged: 0, failed: 0 }
+  for (const r of results) summary[r.outcome]++
+  const body: HostingImportResponse = { results, summary, warnings: ctx.accounts.warnings }
+  return json(200, body)
+}
+
 export async function handleRequest(req: Request, deps: HandlerDeps): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS_HEADERS })
   if (req.method !== 'POST') return fail(405, 'method_not_allowed', 'Use POST.')
@@ -288,7 +533,7 @@ export async function handleRequest(req: Request, deps: HandlerDeps): Promise<Re
     )
   }
 
-  let body: { action?: unknown; domains?: unknown }
+  let body: { action?: unknown; domains?: unknown; plans?: unknown }
   try {
     body = await req.json()
   } catch {
@@ -298,7 +543,13 @@ export async function handleRequest(req: Request, deps: HandlerDeps): Promise<Re
   try {
     if (body?.action === 'preview') return await preview(deps, deps.hostingerToken, auth.userId)
     if (body?.action === 'import') return await runImport(deps, deps.hostingerToken, auth.userId, body.domains)
-    return fail(400, 'invalid_request', 'Unknown action. Use "preview" or "import".')
+    if (body?.action === 'hosting-preview' || body?.action === 'hosting-import') {
+      if (!deps.hosting) return fail(500, 'not_configured', 'Hosting import is not available in this deployment.')
+      return body.action === 'hosting-preview'
+        ? await hostingPreview(deps.hosting, deps, deps.hostingerToken, auth.userId)
+        : await hostingImport(deps.hosting, deps, deps.hostingerToken, auth.userId, body.plans)
+    }
+    return fail(400, 'invalid_request', 'Unknown action. Use "preview", "import", "hosting-preview" or "hosting-import".')
   } catch (error) {
     if (error instanceof HostingerError) return hostingerFailure(error, deps)
     // Database read failures and anything unexpected. Never echo request headers or secrets.

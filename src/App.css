@@ -1034,6 +1034,12 @@
   color: var(--text-muted);
 }
 
+/* The domain name stays on its own lines; its sub-line (e.g. the hosting plan)
+   may wrap so it never widens the table. */
+.domain-table td.cell-domain .cell-sub {
+  white-space: normal;
+}
+
 .cell-money {
   font-variant-numeric: tabular-nums;
 }

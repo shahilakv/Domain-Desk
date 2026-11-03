@@ -351,3 +351,241 @@ export async function fetchPortfolio(
 
   return { domains: merged.domains, skipped: [...parsed.skipped, ...merged.skipped], warnings }
 }
+
+/*
+ * Hosting accounts. Read-only, three documented endpoints:
+ *   GET /api/hosting/v1/orders            Web/Cloud hosting orders (paginated)
+ *   GET /api/hosting/v1/websites          websites on those orders (paginated)
+ *   GET /api/billing/v1/subscriptions     billing: name, renewal price, dates
+ * Docs: https://developers.hostinger.com/#tag/hosting-orders,
+ *       #tag/hosting-websites, #tag/billing-subscriptions
+ */
+
+const PAGE_SIZE = 100
+/** Safety stop for pagination (100 × 20 = 2,000 orders or websites). */
+const MAX_PAGES = 20
+
+/** A website Hostinger runs on a hosting order. */
+export interface HostingerWebsite {
+  /** Normalised domain name. */
+  name: string
+  /** 'main' | 'addon' | 'parked' | 'subdomain', or null when Hostinger doesn't say. */
+  vhostType: string | null
+  /** False when the website is suspended. */
+  enabled: boolean
+}
+
+/** One hosting order, joined with its billing subscription when Hostinger returns it. */
+export interface HostingerHostingAccount {
+  orderId: string
+  subscriptionId: string | null
+  /** Hostinger plan code, e.g. "hostinger_business". */
+  planCode: string | null
+  /** Raw order status: active, suspended, deleting, deleted. */
+  orderStatus: string
+  /** YYYY-MM-DD the order was created. */
+  createdDate: string | null
+  /** Display name from the billing subscription, e.g. "Business Web Hosting". */
+  subscriptionName: string | null
+  subscriptionStatus: string | null
+  /** Next charge while auto-renewing, otherwise the scheduled expiry. Null when Hostinger has neither. */
+  renewalDate: string | null
+  /** Renewal price in major units (Hostinger sends cents). */
+  renewalPrice: number | null
+  currency: string | null
+  autoRenew: boolean | null
+  /** e.g. "1 year", from billing_period + billing_period_unit. */
+  billingPeriod: string | null
+  websites: HostingerWebsite[]
+}
+
+export interface HostingAccountsResult {
+  accounts: HostingerHostingAccount[]
+  skipped: { entry: string; reason: string }[]
+  warnings: string[]
+}
+
+function listFrom(payload: unknown, what: string): unknown[] {
+  if (Array.isArray(payload)) return payload
+  if (payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)) {
+    return (payload as { data: unknown[] }).data
+  }
+  throw new HostingerError('invalid_response', `Hostinger returned an unexpected ${what} format (expected a list).`)
+}
+
+/** Reads every page of a paginated list endpoint ({ data, meta: { current_page, per_page, total } }). */
+async function fetchAllPages(fetchImpl: FetchLike, token: string, path: string, what: string): Promise<unknown[]> {
+  const items: unknown[] = []
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const res = await request(fetchImpl, token, `${path}?page=${page}&per_page=${PAGE_SIZE}`)
+    if (!res.ok) throw await toHostingerError(res)
+    const payload = await readJson(res)
+    const list = listFrom(payload, what)
+    items.push(...list)
+    const meta = (payload as { meta?: { total?: unknown } } | null)?.meta
+    const total = typeof meta?.total === 'number' ? meta.total : null
+    // Stop on a short page, or when the documented total has been reached.
+    if (list.length < PAGE_SIZE || (total !== null && items.length >= total)) return items
+  }
+  return items
+}
+
+const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null)
+const idText = (v: unknown): string | null =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 0
+    ? String(v)
+    : typeof v === 'string' && /^\d{1,20}$/.test(v)
+      ? v
+      : null
+
+interface RawOrder {
+  orderId: string
+  subscriptionId: string | null
+  planCode: string | null
+  status: string
+  createdDate: string | null
+}
+
+export function parseOrders(list: unknown[]): { orders: RawOrder[]; skipped: HostingAccountsResult['skipped'] } {
+  const orders: RawOrder[] = []
+  const skipped: HostingAccountsResult['skipped'] = []
+  list.forEach((raw, index) => {
+    const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+    const orderId = idText(r?.id)
+    if (!r || !orderId) {
+      skipped.push({ entry: `Hosting order ${index + 1}`, reason: 'No usable order id.' })
+      return
+    }
+    const plan = r.plan && typeof r.plan === 'object' ? (r.plan as Record<string, unknown>) : null
+    orders.push({
+      orderId,
+      subscriptionId: str(r.subscription_id),
+      planCode: str(plan?.name),
+      status: str(r.status) ?? 'unknown',
+      createdDate: toISODate(r.created_at),
+    })
+  })
+  return { orders, skipped }
+}
+
+/** Websites grouped by order id. Websites without a domain (e.g. not yet attached) are ignored. */
+export function parseWebsites(list: unknown[]): Map<string, HostingerWebsite[]> {
+  const byOrder = new Map<string, HostingerWebsite[]>()
+  for (const raw of list) {
+    const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+    const orderId = idText(r?.order_id)
+    const domain = str(r?.domain)
+    if (!r || !orderId || !domain) continue
+    const name = normalizeDomainName(domain)
+    if (!isValidDomainName(name)) continue
+    const site: HostingerWebsite = { name, vhostType: str(r.vhost_type), enabled: r.is_enabled !== false }
+    const sites = byOrder.get(orderId)
+    if (!sites) byOrder.set(orderId, [site])
+    else if (!sites.some((s) => s.name === name)) sites.push(site)
+  }
+  for (const sites of byOrder.values()) sites.sort((a, b) => a.name.localeCompare(b.name))
+  return byOrder
+}
+
+interface RawSubscription {
+  name: string | null
+  status: string | null
+  renewalDate: string | null
+  renewalPrice: number | null
+  currency: string | null
+  autoRenew: boolean | null
+  billingPeriod: string | null
+}
+
+export function parseSubscriptions(list: unknown[]): Map<string, RawSubscription> {
+  const byId = new Map<string, RawSubscription>()
+  for (const raw of list) {
+    const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
+    const id = str(r?.id)
+    if (!r || !id) continue
+    const autoRenew = typeof r.is_auto_renewed === 'boolean' ? r.is_auto_renewed : null
+    // Documented: next_billing_at only applies while auto-renewing; expires_at is set
+    // once a cancellation is scheduled (e.g. auto-renewal turned off).
+    const renewalDate =
+      autoRenew === false ? toISODate(r.expires_at) : (toISODate(r.next_billing_at) ?? toISODate(r.expires_at))
+    const cents =
+      typeof r.renewal_price === 'number' && Number.isFinite(r.renewal_price) && r.renewal_price >= 0 ? r.renewal_price : null
+    const currency = str(r.currency_code)?.toUpperCase() ?? null
+    const period = typeof r.billing_period === 'number' && r.billing_period > 0 ? r.billing_period : null
+    const unit = str(r.billing_period_unit)
+    byId.set(id, {
+      name: str(r.name),
+      status: str(r.status),
+      renewalDate,
+      renewalPrice: cents === null ? null : Math.round(cents) / 100,
+      currency: currency && /^[A-Z]{3}$/.test(currency) ? currency : null,
+      autoRenew,
+      billingPeriod: period && unit ? `${period} ${unit}${period === 1 ? '' : 's'}` : null,
+    })
+  }
+  return byId
+}
+
+/**
+ * Optional lookups: a failure (other than a rejected token) becomes a warning
+ * so the orders can still be imported, with the missing fields left empty.
+ */
+async function optional<T>(load: () => Promise<T>, fallback: T, warning: string, warnings: string[]): Promise<T> {
+  try {
+    return await load()
+  } catch (error) {
+    if (error instanceof HostingerError && error.status === 401) throw error
+    warnings.push(`${warning} (${error instanceof HostingerError ? error.message : 'request failed'})`)
+    return fallback
+  }
+}
+
+async function fetchSubscriptions(fetchImpl: FetchLike, token: string): Promise<unknown[]> {
+  const res = await request(fetchImpl, token, '/api/billing/v1/subscriptions')
+  if (!res.ok) throw await toHostingerError(res)
+  return listFrom(await readJson(res), 'subscriptions')
+}
+
+export async function fetchHostingAccounts(fetchImpl: FetchLike, token: string): Promise<HostingAccountsResult> {
+  const warnings: string[] = []
+  const [orderList, websiteList, subscriptionList] = await Promise.all([
+    fetchAllPages(fetchImpl, token, '/api/hosting/v1/orders', 'hosting orders'),
+    optional(
+      () => fetchAllPages(fetchImpl, token, '/api/hosting/v1/websites', 'websites'),
+      [] as unknown[],
+      'Connected domains are unavailable, so no domains will be linked automatically',
+      warnings,
+    ),
+    optional(
+      () => fetchSubscriptions(fetchImpl, token),
+      [] as unknown[],
+      'Billing details (plan name, renewal date and price) are unavailable',
+      warnings,
+    ),
+  ])
+
+  const { orders, skipped } = parseOrders(orderList)
+  const websites = parseWebsites(websiteList)
+  const subscriptions = parseSubscriptions(subscriptionList)
+
+  const accounts = orders.map((o): HostingerHostingAccount => {
+    const sub = o.subscriptionId ? subscriptions.get(o.subscriptionId) : undefined
+    return {
+      orderId: o.orderId,
+      subscriptionId: o.subscriptionId,
+      planCode: o.planCode,
+      orderStatus: o.status,
+      createdDate: o.createdDate,
+      subscriptionName: sub?.name ?? null,
+      subscriptionStatus: sub?.status ?? null,
+      renewalDate: sub?.renewalDate ?? null,
+      renewalPrice: sub?.renewalPrice ?? null,
+      currency: sub?.currency ?? null,
+      autoRenew: sub?.autoRenew ?? null,
+      billingPeriod: sub?.billingPeriod ?? null,
+      websites: websites.get(o.orderId) ?? [],
+    }
+  })
+  accounts.sort((a, b) => Number(a.orderId) - Number(b.orderId))
+  return { accounts, skipped, warnings }
+}

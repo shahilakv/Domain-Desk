@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { DEFAULT_OWNERSHIP, domainLifecycles, ownershipTypes } from '../../data/options'
 import { describeError, saveDomain } from '../../lib/api'
 import type { DomainInput } from '../../types/db'
-import type { Client, Domain, DomainLifecycle, OwnershipType } from '../../types/domain'
+import type { Client, Domain, DomainLifecycle, HostingPlan, OwnershipType } from '../../types/domain'
 import { isValidDomainName, normalizeDomainName, nullIfEmpty } from '../../utils/format'
 import { Field, FormDialog } from '../FormDialog'
 
@@ -10,15 +10,28 @@ interface DomainFormProps {
   userId: string
   domain?: Domain
   clients: Client[]
+  hostingPlans: HostingPlan[]
+  /** False when hosting plans couldn't be loaded; the domain's plan is then left as it is. */
+  hostingAvailable: boolean
   /** Existing names, used to catch duplicates before the database does. */
   existingNames: string[]
   onSaved: (message: string) => void
   onClose: () => void
 }
 
-export function DomainForm({ userId, domain, clients, existingNames, onSaved, onClose }: DomainFormProps) {
+export function DomainForm({
+  userId,
+  domain,
+  clients,
+  hostingPlans,
+  hostingAvailable,
+  existingNames,
+  onSaved,
+  onClose,
+}: DomainFormProps) {
   const [name, setName] = useState(domain?.name ?? '')
   const [clientId, setClientId] = useState(domain?.clientId ?? '')
+  const [hostingPlanId, setHostingPlanId] = useState(domain?.hostingPlanId ?? '')
   const [registrar, setRegistrar] = useState(domain?.registrar ?? '')
   const [expiryDate, setExpiryDate] = useState(domain?.expiryDate ?? '')
   const [lifecycle, setLifecycle] = useState<DomainLifecycle>(domain?.lifecycle ?? 'active')
@@ -50,6 +63,7 @@ export function DomainForm({ userId, domain, clients, existingNames, onSaved, on
         auto_renew: autoRenew,
         notes: nullIfEmpty(notes),
         ownership_type: ownership,
+        ...(hostingAvailable && { hosting_plan_id: hostingPlanId || null }),
       }
       await saveDomain(userId, values, domain?.id)
       onSaved(domain ? `Saved ${normalized}.` : `Added ${normalized}.`)
@@ -91,6 +105,23 @@ export function DomainForm({ userId, domain, clients, existingNames, onSaved, on
           ))}
         </select>
       </Field>
+      {hostingAvailable && (
+        <Field
+          label="Hosting plan"
+          htmlFor="domain-hosting"
+          full
+          hint={hostingPlans.length === 0 ? 'Add or import hosting plans on the Hosting Plans page.' : undefined}
+        >
+          <select id="domain-hosting" value={hostingPlanId} onChange={(e) => setHostingPlanId(e.target.value)}>
+            <option value="">Not on a hosting plan</option>
+            {hostingPlans.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.planName} ({p.provider}){p.client ? ` — ${p.client}` : ''}
+              </option>
+            ))}
+          </select>
+        </Field>
+      )}
       <Field label="Registrar" htmlFor="domain-registrar">
         <input
           id="domain-registrar"

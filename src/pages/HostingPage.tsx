@@ -13,6 +13,7 @@ interface HostingPageProps {
   /** Why hosting plans could not be loaded; null when they loaded. */
   unavailable: string | null
   onAdd: () => void
+  onImport: () => void
   onEdit: (plan: HostingPlan) => void
   onDelete: (plan: HostingPlan) => void
 }
@@ -30,7 +31,7 @@ function margin(p: HostingPlan): number | null {
   return p.clientCharge !== null && p.hostingCost !== null ? p.clientCharge - p.hostingCost : null
 }
 
-export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: HostingPageProps) {
+export function HostingPage({ plans, unavailable, onAdd, onImport, onEdit, onDelete }: HostingPageProps) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<HostingStatus | 'all'>('all')
 
@@ -39,7 +40,7 @@ export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: Hos
       plans.filter(
         (p) =>
           (status === 'all' || p.status === status) &&
-          matchesSearch(query, p.planName, p.provider, p.client, p.notes, ...p.domainNames),
+          matchesSearch(query, p.planName, p.provider, p.client, p.notes, p.hostingerOrderId ?? '', ...p.domainNames),
       ),
     [plans, query, status],
   )
@@ -61,14 +62,20 @@ export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: Hos
         title="Hosting and the domains it covers."
         subtitle="Track each plan's renewal date, what it costs you and what you bill the client."
         action={
-          <Button
-            icon="plus"
-            onClick={onAdd}
-            disabled={unavailable !== null}
-            title={unavailable ?? undefined}
-          >
-            Add Hosting Plan
-          </Button>
+          <div className="hero-actions">
+            <Button icon="plus" onClick={onAdd} disabled={unavailable !== null} title={unavailable ?? undefined}>
+              Add Hosting Plan
+            </Button>
+            <Button
+              variant="secondary"
+              icon="download"
+              onClick={onImport}
+              disabled={unavailable !== null}
+              title={unavailable ?? undefined}
+            >
+              Import from Hostinger
+            </Button>
+          </div>
         }
       />
 
@@ -136,7 +143,7 @@ export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: Hos
             {unavailable
               ? unavailable
               : plans.length === 0
-                ? 'No hosting plans yet. Add one to track its renewal and the domains it covers.'
+                ? 'No hosting plans yet. Add one, or import your plans from Hostinger.'
                 : 'No hosting plans match your filters.'}
           </p>
         ) : (
@@ -169,6 +176,7 @@ export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: Hos
                         {p.planName}
                         <span className="cell-sub">
                           {p.provider}
+                          {p.hostingerOrderId ? ' · Synced' : ''}
                           {p.autoRenew ? ' · Auto-renew' : ''}
                         </span>
                       </td>
@@ -182,7 +190,11 @@ export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: Hos
                       </td>
                       <td className="cell-expiry" data-label="Renews">
                         {open && days !== null && <span className="countdown">{describeDue(days)}</span>}
-                        <time dateTime={p.renewalDate ?? undefined}>{formatDate(p.renewalDate)}</time>
+                        {p.renewalDate ? (
+                          <time dateTime={p.renewalDate}>{formatDate(p.renewalDate)}</time>
+                        ) : (
+                          <span className="cell-muted">No renewal date</span>
+                        )}
                       </td>
                       <td data-label="Cost" className="cell-money">
                         {formatMoney(p.hostingCost, p.currency)}

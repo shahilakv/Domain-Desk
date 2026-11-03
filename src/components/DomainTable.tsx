@@ -10,9 +10,18 @@ interface DomainTableProps {
   emptyMessage?: string
   onEdit?: (domain: Domain) => void
   onDelete: (domain: Domain) => void
+  /** Plan names by id; when given, each domain shows the hosting plan it is on. */
+  planNames?: Map<string, string>
 }
 
-export function DomainTable({ domains, caption, emptyMessage = 'No domains to show yet.', onEdit, onDelete }: DomainTableProps) {
+export function DomainTable({
+  domains,
+  caption,
+  emptyMessage = 'No domains to show yet.',
+  onEdit,
+  onDelete,
+  planNames,
+}: DomainTableProps) {
   if (domains.length === 0) {
     return <p className="empty-state">{emptyMessage}</p>
   }
@@ -43,6 +52,13 @@ export function DomainTable({ domains, caption, emptyMessage = 'No domains to sh
                 {/* data-label is shown as a field label in the card layouts. */}
                 <td className="cell-domain">
                   <DomainName name={domain.name} />
+                  {planNames && (
+                    <span className="cell-sub">
+                      {domain.hostingPlanId
+                        ? `Hosting: ${planNames.get(domain.hostingPlanId) ?? 'linked plan'}`
+                        : 'No hosting plan'}
+                    </span>
+                  )}
                 </td>
                 <td className="cell-client" data-label="Client">
                   {domain.client || <span className="cell-muted">No client</span>}

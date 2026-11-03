@@ -46,6 +46,10 @@ export function RenewalForm({
   const code = currency.trim().toUpperCase()
   const margin = typeof cost === 'number' && typeof charge === 'number' ? charge - cost : null
   const isHosting = kind === 'hosting'
+  const pickedPlan = isHosting ? hostingPlans.find((p) => p.id === hostingPlanId) : undefined
+  const planMissing = pickedPlan
+    ? [!pickedPlan.renewalDate && 'renewal date', pickedPlan.hostingCost === null && 'cost'].filter(Boolean)
+    : []
 
   const pickDomain = (id: string) => {
     setDomainId(id)
@@ -145,7 +149,12 @@ export function RenewalForm({
         </select>
       </Field>
       {isHosting ? (
-        <Field label="Hosting plan *" htmlFor="renewal-plan" full>
+        <Field
+          label="Hosting plan *"
+          htmlFor="renewal-plan"
+          full
+          hint={planMissing.length > 0 ? `This plan has no ${planMissing.join(' or ')} recorded; enter it below.` : undefined}
+        >
           <select id="renewal-plan" value={hostingPlanId} onChange={(e) => pickPlan(e.target.value)} required autoFocus>
             <option value="" disabled>
               Choose a hosting plan…

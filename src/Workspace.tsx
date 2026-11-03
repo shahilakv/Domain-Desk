@@ -6,6 +6,7 @@ import { LogoMark } from './components/Decorations'
 import { ClientForm } from './components/forms/ClientForm'
 import { DomainForm } from './components/forms/DomainForm'
 import { HostingPlanForm } from './components/forms/HostingPlanForm'
+import { HostingerHostingImport } from './components/HostingerHostingImport'
 import { HostingerImport } from './components/HostingerImport'
 import { RenewalForm } from './components/forms/RenewalForm'
 import { Icon } from './components/Icon'
@@ -27,6 +28,7 @@ import { formatMoney } from './utils/format'
 type Editor =
   | { kind: 'domain'; domain?: Domain }
   | { kind: 'hostinger-import' }
+  | { kind: 'hostinger-hosting-import' }
   | { kind: 'client'; client?: Client }
   | { kind: 'renewal'; renewal?: Renewal }
   | { kind: 'hosting'; plan?: HostingPlan }
@@ -175,6 +177,7 @@ export function Workspace({ session }: { session: Session }) {
     content = (
       <DomainsPage
         domains={state.data.domains}
+        hostingPlans={state.data.hostingError ? null : state.data.hostingPlans}
         onAdd={() => editDomain()}
         onImport={() => setEditor({ kind: 'hostinger-import' })}
         onEdit={editDomain}
@@ -187,6 +190,7 @@ export function Workspace({ session }: { session: Session }) {
         plans={state.data.hostingPlans}
         unavailable={state.data.hostingError}
         onAdd={() => setEditor({ kind: 'hosting' })}
+        onImport={() => setEditor({ kind: 'hostinger-hosting-import' })}
         onEdit={(plan) => setEditor({ kind: 'hosting', plan })}
         onDelete={(item) => requestDelete({ kind: 'hosting', item })}
       />
@@ -249,6 +253,8 @@ export function Workspace({ session }: { session: Session }) {
           userId={userId}
           domain={editor.domain}
           clients={data.clients}
+          hostingPlans={data.hostingPlans}
+          hostingAvailable={data.hostingError === null}
           existingNames={data.domains.map((d) => d.name)}
           onSaved={handleSaved}
           onClose={() => setEditor(null)}
@@ -256,6 +262,9 @@ export function Workspace({ session }: { session: Session }) {
       )}
       {data && editor?.kind === 'hostinger-import' && (
         <HostingerImport onImported={reload} onClose={() => setEditor(null)} />
+      )}
+      {data && editor?.kind === 'hostinger-hosting-import' && (
+        <HostingerHostingImport onImported={reload} onClose={() => setEditor(null)} />
       )}
       {data && editor?.kind === 'client' && (
         <ClientForm userId={userId} client={editor.client} onSaved={handleSaved} onClose={() => setEditor(null)} />

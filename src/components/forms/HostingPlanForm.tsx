@@ -105,7 +105,15 @@ export function HostingPlanForm({ plan, clients, domains, plans, onSaved, onClos
       onSubmit={submit}
       onClose={onClose}
     >
-      <Field label="Provider *" htmlFor="hosting-provider">
+      <Field
+        label="Provider *"
+        htmlFor="hosting-provider"
+        hint={
+          plan?.hostingerOrderId
+            ? `Hostinger order #${plan.hostingerOrderId}. Importing again updates the renewal date, cost, currency, auto-renew and status.`
+            : undefined
+        }
+      >
         <input
           id="hosting-provider"
           value={provider}

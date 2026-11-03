@@ -78,6 +78,9 @@ export interface HostingPlanRow {
   auto_renew: boolean
   status: string
   notes: string | null
+  /* From the 20261105 migration (Hostinger import); absent before it. */
+  hostinger_order_id?: string | null
+  last_synced_at?: string | null
 }
 
 /** Columns the app writes. user_id is always set from the signed-in session. */
@@ -85,10 +88,11 @@ export type ClientInput = Pick<ClientRow, 'name' | 'contact_name' | 'email' | 'p
 export type DomainInput = Pick<
   DomainRow,
   'client_id' | 'domain_name' | 'registrar' | 'expiry_date' | 'status' | 'auto_renew' | 'notes' | 'ownership_type'
->
+> &
+  Partial<Pick<DomainRow, 'hosting_plan_id'>>
 type RenewalFields = Pick<RenewalRow, 'renewal_date' | 'registrar_cost' | 'client_charge' | 'currency' | 'status' | 'notes'>
 /** A renewal targets a domain or a hosting plan, never both. */
 export type RenewalInput =
   | (RenewalFields & { domain_id: string; hosting_plan_id?: never })
   | (RenewalFields & { hosting_plan_id: string; domain_id?: never })
-export type HostingPlanInput = Omit<HostingPlanRow, 'id'>
+export type HostingPlanInput = Omit<HostingPlanRow, 'id' | 'hostinger_order_id' | 'last_synced_at'>

@@ -101,6 +101,20 @@ function asHostingStatus(value: string | null): HostingStatus {
 /** Only the columns the app uses. */
 const HOSTING_COLUMNS =
   'id, client_id, provider, plan_name, start_date, renewal_date, hosting_cost, client_charge, currency, auto_renew, status, notes'
+const HOSTING_SYNC_COLUMNS = `${HOSTING_COLUMNS}, hostinger_order_id, last_synced_at`
+
+/** Hosting plans, with the Hostinger columns when the 20261105 migration is applied. */
+async function fetchHostingPlans(userId: string) {
+  const query = (columns: string) =>
+    supabase
+      .from('hosting_plans')
+      .select(columns)
+      .eq('user_id', userId)
+      .order('renewal_date', { ascending: true, nullsFirst: false })
+  const full = await query(HOSTING_SYNC_COLUMNS)
+  const code = (full.error as DbError | null)?.code
+  return code === '42703' || code === 'PGRST204' ? query(HOSTING_COLUMNS) : full
+}
 
 /** The hosting_plans table does not exist yet (migration not applied). */
 function isMissingTable(error: { code?: string }): boolean {
@@ -128,11 +142,7 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       .select('*')
       .eq('user_id', userId)
       .order('renewal_date', { ascending: false, nullsFirst: false }),
-    supabase
-      .from('hosting_plans')
-      .select(HOSTING_COLUMNS)
-      .eq('user_id', userId)
-      .order('renewal_date', { ascending: true, nullsFirst: false }),
+    fetchHostingPlans(userId),
   ])
   if (clientsRes.error) throw clientsRes.error
   if (domainsRes.error) throw domainsRes.error
@@ -147,7 +157,7 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
   const clientRows = clientsRes.data as ClientRow[]
   const domainRows = domainsRes.data as DomainRow[]
   const renewalRows = renewalsRes.data as RenewalRow[]
-  const hostingRows = (hostingRes.data ?? []) as HostingPlanRow[]
+  const hostingRows = (hostingRes.data ?? []) as unknown as HostingPlanRow[]
 
   const clientNames = new Map(clientRows.map((c) => [c.id, c.name]))
   const domainCounts = new Map<string, number>()
@@ -236,6 +246,8 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       status: asHostingStatus(h.status),
       notes: h.notes ?? '',
       domainNames: domainNamesByPlan.get(h.id) ?? [],
+      hostingerOrderId: h.hostinger_order_id ?? null,
+      lastSyncedAt: h.last_synced_at ?? null,
     })),
     hostingError,
   }
