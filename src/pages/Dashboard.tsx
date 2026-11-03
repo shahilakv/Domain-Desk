@@ -1,13 +1,13 @@
 import { useMemo } from 'react'
 import { Button } from '../components/Button'
 import { CubeCluster, Gem } from '../components/Decorations'
-import { DemoNotice } from '../components/DemoNotice'
 import { NeedsAttention } from '../components/NeedsAttention'
 import { SummaryCard } from '../components/SummaryCard'
 import { UpcomingExpiries } from '../components/UpcomingExpiries'
 import { useMediaQuery } from '../hooks/useMediaQuery'
-import type { Domain } from '../types/domain'
-import { daysUntilExpiry, getDomainStatus, isExpired, isRenewalDue } from '../utils/domainStatus'
+import type { Domain, Renewal } from '../types/domain'
+import { compareByExpiry, daysUntilExpiry, getDomainStatus, isExpired, isRenewalDue } from '../utils/domainStatus'
+import { formatTotals, sumByCurrency } from '../utils/format'
 
 const TABLE_ROW_LIMIT = 8
 const ATTENTION_LIMIT = 6
@@ -53,32 +53,40 @@ function HeroArt() {
 
 interface DashboardProps {
   domains: Domain[]
+  renewals: Renewal[]
   onAddDomain: () => void
   onViewAllDomains: () => void
+  onEditDomain: (domain: Domain) => void
   onDeleteDomain: (domain: Domain) => void
 }
 
-export function Dashboard({ domains, onAddDomain, onViewAllDomains, onDeleteDomain }: DashboardProps) {
+export function Dashboard({ domains, renewals, onAddDomain, onViewAllDomains, onEditDomain, onDeleteDomain }: DashboardProps) {
   const { stats, attention, upcoming } = useMemo(() => {
-    const byExpiry = [...domains].sort((a, b) => a.expiryDate.localeCompare(b.expiryDate))
+    // Transferred or cancelled domains no longer need renewing.
+    const active = domains.filter((d) => d.lifecycle === 'active')
+    const byExpiry = [...active].sort(compareByExpiry)
+    const outstanding = sumByCurrency(
+      renewals.filter((r) => r.status === 'invoiced').map((r) => ({ amount: r.clientCharge, currency: r.currency })),
+    )
     return {
       stats: {
         total: domains.length,
-        renewalsDue: domains.filter((d) => isRenewalDue(d)).length,
+        renewalsDue: active.filter((d) => isRenewalDue(d)).length,
         paymentsPending: domains.filter((d) => d.paymentStatus === 'pending').length,
-        expired: domains.filter((d) => isExpired(d)).length,
+        outstanding: outstanding.size > 0 ? `${formatTotals(outstanding)} outstanding` : undefined,
+        expired: active.filter((d) => isExpired(d)).length,
       },
       attention: byExpiry.filter((d) => getDomainStatus(d) !== 'active').slice(0, ATTENTION_LIMIT),
-      upcoming: byExpiry.filter((d) => daysUntilExpiry(d) >= 0).slice(0, TABLE_ROW_LIMIT),
+      upcoming: byExpiry.filter((d) => daysUntilExpiry(d) >= 0 && d.expiryDate).slice(0, TABLE_ROW_LIMIT),
     }
-  }, [domains])
+  }, [domains, renewals])
 
   // On phones, upcoming expiries come straight after the summary. Reordering
   // in the DOM (not just CSS) keeps reading and focus order consistent.
   const isPhone = useMediaQuery(PHONE_QUERY)
-  const attentionSection = <NeedsAttention domains={attention} onDelete={onDeleteDomain} />
+  const attentionSection = <NeedsAttention domains={attention} onEdit={onEditDomain} onDelete={onDeleteDomain} />
   const upcomingSection = (
-    <UpcomingExpiries domains={upcoming} onViewAll={onViewAllDomains} onDelete={onDeleteDomain} />
+    <UpcomingExpiries domains={upcoming} onViewAll={onViewAllDomains} onEdit={onEditDomain} onDelete={onDeleteDomain} />
   )
 
   return (
@@ -95,8 +103,6 @@ export function Dashboard({ domains, onAddDomain, onViewAllDomains, onDeleteDoma
         <HeroArt />
       </header>
 
-      <DemoNotice />
-
       <section className="summary-grid" aria-label="Summary">
         <SummaryCard label="Total Domains" value={stats.total} icon="globe" tone="sky" />
         <SummaryCard
@@ -105,7 +111,13 @@ export function Dashboard({ domains, onAddDomain, onViewAllDomains, onDeleteDoma
           icon="calendar"
           tone="lavender"
         />
-        <SummaryCard label="Payments Pending" value={stats.paymentsPending} icon="wallet" tone="sunny" />
+        <SummaryCard
+          label="Payments Pending"
+          value={stats.paymentsPending}
+          icon="wallet"
+          tone="sunny"
+          hint={stats.outstanding}
+        />
         <SummaryCard label="Expired Domains" value={stats.expired} icon="alert" tone="coral" />
       </section>
 

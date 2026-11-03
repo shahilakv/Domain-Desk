@@ -1,18 +1,20 @@
 import type { Domain } from '../types/domain'
 import { daysUntilExpiry, describeExpiry, formatDate, getExpiryUrgency } from '../utils/domainStatus'
-import { DeleteButton } from './DeleteButton'
+import { RowActions } from './DeleteButton'
 import { DomainBadges } from './DomainBadges'
 import { DomainName } from './DomainName'
 
 interface DomainTableProps {
   domains: Domain[]
   caption: string
+  emptyMessage?: string
+  onEdit?: (domain: Domain) => void
   onDelete: (domain: Domain) => void
 }
 
-export function DomainTable({ domains, caption, onDelete }: DomainTableProps) {
+export function DomainTable({ domains, caption, emptyMessage = 'No domains to show yet.', onEdit, onDelete }: DomainTableProps) {
   if (domains.length === 0) {
-    return <p className="empty-state">No domains to show yet.</p>
+    return <p className="empty-state">{emptyMessage}</p>
   }
 
   return (
@@ -34,7 +36,8 @@ export function DomainTable({ domains, caption, onDelete }: DomainTableProps) {
         <tbody>
           {domains.map((domain) => {
             const days = daysUntilExpiry(domain)
-            const urgency = getExpiryUrgency(days)
+            // Transferred/cancelled domains no longer need renewing.
+            const urgency = domain.lifecycle === 'active' ? getExpiryUrgency(days) : 'calm'
             return (
               <tr key={domain.id} className={`urgency-${urgency}`}>
                 {/* data-label is shown as a field label in the card layouts. */}
@@ -42,20 +45,24 @@ export function DomainTable({ domains, caption, onDelete }: DomainTableProps) {
                   <DomainName name={domain.name} />
                 </td>
                 <td className="cell-client" data-label="Client">
-                  {domain.client}
+                  {domain.client || <span className="cell-muted">No client</span>}
                 </td>
                 <td className="cell-registrar cell-muted" data-label="Registrar">
-                  {domain.registrar}
+                  {domain.registrar || '—'}
                 </td>
                 <td className="cell-expiry" data-label="Expiry">
                   <span className="countdown">{describeExpiry(days)}</span>
-                  <time dateTime={domain.expiryDate}>{formatDate(domain.expiryDate)}</time>
+                  {domain.expiryDate && <time dateTime={domain.expiryDate}>{formatDate(domain.expiryDate)}</time>}
                 </td>
                 <td className="cell-status" data-label="Status">
                   <DomainBadges domain={domain} />
                 </td>
                 <td className="cell-actions">
-                  <DeleteButton domainName={domain.name} onClick={() => onDelete(domain)} />
+                  <RowActions
+                    itemName={domain.name}
+                    onEdit={onEdit && (() => onEdit(domain))}
+                    onDelete={() => onDelete(domain)}
+                  />
                 </td>
               </tr>
             )

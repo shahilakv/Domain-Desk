@@ -16,10 +16,25 @@ export function parseISODate(iso: string): Date {
   return new Date(y, m - 1, d)
 }
 
-/** Whole days until expiry. Negative once the domain has expired. */
+/** Whole days from today until an ISO date. Negative once it has passed. */
+export function daysUntil(iso: string, today: Date = new Date()): number {
+  return Math.round((parseISODate(iso).getTime() - startOfDay(today).getTime()) / MS_PER_DAY)
+}
+
+/**
+ * Whole days until expiry. Negative once the domain has expired; Infinity when
+ * no expiry date is recorded (treated as never due).
+ */
 export function daysUntilExpiry(domain: Domain, today: Date = new Date()): number {
-  const expiry = parseISODate(domain.expiryDate)
-  return Math.round((expiry.getTime() - startOfDay(today).getTime()) / MS_PER_DAY)
+  return domain.expiryDate ? daysUntil(domain.expiryDate, today) : Number.POSITIVE_INFINITY
+}
+
+/** Sort comparator: earliest expiry first, undated domains last. */
+export function compareByExpiry(a: Domain, b: Domain): number {
+  if (a.expiryDate === b.expiryDate) return a.name.localeCompare(b.name)
+  if (!a.expiryDate) return 1
+  if (!b.expiryDate) return -1
+  return a.expiryDate.localeCompare(b.expiryDate)
 }
 
 export function isExpired(domain: Domain, today?: Date): boolean {
@@ -64,7 +79,8 @@ export const urgencyLabels: Record<ExpiryUrgency, string> = {
   calm: 'On track',
 }
 
-export function formatDate(iso: string): string {
+export function formatDate(iso: string | null): string {
+  if (!iso) return '—'
   return parseISODate(iso).toLocaleDateString(undefined, {
     day: 'numeric',
     month: 'short',
@@ -73,6 +89,7 @@ export function formatDate(iso: string): string {
 }
 
 export function describeExpiry(days: number): string {
+  if (!Number.isFinite(days)) return 'No expiry date'
   if (days < 0) return `Expired ${Math.abs(days)} day${days === -1 ? '' : 's'} ago`
   if (days === 0) return 'Expires today'
   return `Expires in ${days} day${days === 1 ? '' : 's'}`

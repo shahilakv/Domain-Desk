@@ -1,3 +1,4 @@
+import { lifecycleLabels } from '../data/options'
 import type { Domain, PaymentStatus } from '../types/domain'
 import { daysUntilExpiry, getExpiryUrgency, urgencyLabels, type ExpiryUrgency } from '../utils/domainStatus'
 import { Icon } from './Icon'
@@ -21,7 +22,11 @@ export function PaymentBadge({ status }: { status: PaymentStatus }) {
 export function DomainBadges({ domain }: { domain: Domain }) {
   return (
     <span className="badge-group">
-      <ExpiryBadge urgency={getExpiryUrgency(daysUntilExpiry(domain))} />
+      {domain.lifecycle === 'active' ? (
+        domain.expiryDate && <ExpiryBadge urgency={getExpiryUrgency(daysUntilExpiry(domain))} />
+      ) : (
+        <span className="badge badge-calm">{lifecycleLabels[domain.lifecycle]}</span>
+      )}
       <PaymentBadge status={domain.paymentStatus} />
     </span>
   )

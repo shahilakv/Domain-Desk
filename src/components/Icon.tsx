@@ -65,7 +65,27 @@ const paths = {
       <path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7" />
     </>
   ),
+  edit: (
+    <>
+      <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z" />
+      <path d="M13.5 6.5l4 4" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M20 20l-3.5-3.5" />
+    </>
+  ),
+  logout: (
+    <>
+      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" />
+      <path d="M10 17l-5-5 5-5M5 12h11" />
+    </>
+  ),
   plus: <path d="M12 5v14M5 12h14" />,
+  download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
   menu: <path d="M4 6h16M4 12h16M4 18h16" />,
   chevronDown: <path d="M6 9l6 6 6-6" />,

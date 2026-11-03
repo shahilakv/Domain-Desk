@@ -6,6 +6,8 @@ interface ConfirmDialogProps {
   title: string
   children?: ReactNode
   confirmLabel?: string
+  /** Disables both actions while the confirmed operation runs. */
+  busy?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -19,6 +21,7 @@ export function ConfirmDialog({
   title,
   children,
   confirmLabel = 'Confirm',
+  busy = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -39,22 +42,22 @@ export function ConfirmDialog({
       onCancel={(event) => {
         // Escape key: let React state drive closing.
         event.preventDefault()
-        onCancel()
+        if (!busy) onCancel()
       }}
       onClick={(event) => {
         // Clicking the backdrop (outside the panel) cancels.
-        if (event.target === event.currentTarget) onCancel()
+        if (event.target === event.currentTarget && !busy) onCancel()
       }}
     >
       <div className="confirm-panel">
         <h2 id="confirm-dialog-title">{title}</h2>
         {children && <div className="confirm-body">{children}</div>}
         <div className="confirm-actions">
-          <Button variant="secondary" onClick={onCancel} autoFocus>
+          <Button variant="secondary" onClick={onCancel} disabled={busy} autoFocus>
             Cancel
           </Button>
-          <Button variant="danger" icon="trash" onClick={onConfirm}>
-            {confirmLabel}
+          <Button variant="danger" icon="trash" onClick={onConfirm} disabled={busy}>
+            {busy ? 'Working…' : confirmLabel}
           </Button>
         </div>
       </div>

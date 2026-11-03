@@ -7,9 +7,12 @@ interface SidebarProps {
   onNavigate: (page: PageId) => void
   isOpen: boolean
   onClose: () => void
+  userEmail: string
+  signingOut: boolean
+  onSignOut: () => void
 }
 
-export function Sidebar({ activePage, onNavigate, isOpen, onClose }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, isOpen, onClose, userEmail, signingOut, onSignOut }: SidebarProps) {
   return (
     <>
       <div
@@ -58,6 +61,18 @@ export function Sidebar({ activePage, onNavigate, isOpen, onClose }: SidebarProp
               [0, 0, 1],
             ]}
           />
+        </div>
+
+        <div className="sidebar-account">
+          <span className="sidebar-email" title={userEmail}>
+            {userEmail}
+          </span>
+          <button type="button" className="nav-link sign-out-link" onClick={onSignOut} disabled={signingOut}>
+            <span className="icon-chip icon-chip-sm">
+              <Icon name="logout" size={18} />
+            </span>
+            <span>{signingOut ? 'Signing out…' : 'Sign out'}</span>
+          </button>
         </div>
 
         <p className="sidebar-footer">Internal tool · v0.1</p>

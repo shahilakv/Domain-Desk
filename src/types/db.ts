@@ -1,0 +1,68 @@
+/*
+ * Row shapes of the Supabase tables, matching the live schema
+ * (see supabase/checks/inspect_schema.sql to re-verify).
+ */
+
+export interface ClientRow {
+  id: string
+  user_id: string
+  name: string
+  contact_name: string | null
+  email: string | null
+  phone: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface DomainRow {
+  id: string
+  user_id: string
+  client_id: string | null
+  domain_name: string
+  registrar: string | null
+  /** date (YYYY-MM-DD) */
+  expiry_date: string | null
+  status: string | null
+  auto_renew: boolean | null
+  notes: string | null
+  /** 'agency' | 'client'; NOT NULL, defaults to 'client'. */
+  ownership_type: string
+  /* The columns below come from the 20261102 migration and are absent before it. */
+  /** 'hostinger' when the row is linked to a registrar import. */
+  provider?: string | null
+  provider_domain_id?: string | null
+  provider_status?: string | null
+  /** date (YYYY-MM-DD) */
+  registered_date?: string | null
+  last_synced_at?: string | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface RenewalRow {
+  id: string
+  user_id: string
+  domain_id: string
+  /** date (YYYY-MM-DD) */
+  renewal_date: string | null
+  /** numeric: what the registrar charges us */
+  registrar_cost: number | string | null
+  /** numeric: what we bill the client */
+  client_charge: number | string | null
+  currency: string | null
+  status: string | null
+  notes: string | null
+  created_at: string
+}
+
+/** Columns the app writes. user_id is always set from the signed-in session. */
+export type ClientInput = Pick<ClientRow, 'name' | 'contact_name' | 'email' | 'phone' | 'notes'>
+export type DomainInput = Pick<
+  DomainRow,
+  'client_id' | 'domain_name' | 'registrar' | 'expiry_date' | 'status' | 'auto_renew' | 'notes' | 'ownership_type'
+>
+export type RenewalInput = Pick<
+  RenewalRow,
+  'domain_id' | 'renewal_date' | 'registrar_cost' | 'client_charge' | 'currency' | 'status' | 'notes'
+>
