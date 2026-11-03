@@ -23,7 +23,9 @@ export function describeAuthError(error: { message?: string; status?: number; co
   if (error.status === 429 || /rate limit/i.test(message)) {
     return 'Too many attempts. Please wait a moment and try again.'
   }
-  if (/fetch|network/i.test(message)) {
+  // Only real transport failures (Chrome/Edge, Firefox, Safari wording), not e.g.
+  // "Failed to execute 'fetch'", which signals a bad request built in the app itself.
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
     return 'Could not reach the sign-in service. Check your connection and try again.'
   }
   return message || 'Something went wrong. Please try again.'
