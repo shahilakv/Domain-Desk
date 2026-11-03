@@ -5,20 +5,22 @@ import { ConfirmDialog } from './components/ConfirmDialog'
 import { LogoMark } from './components/Decorations'
 import { ClientForm } from './components/forms/ClientForm'
 import { DomainForm } from './components/forms/DomainForm'
+import { HostingPlanForm } from './components/forms/HostingPlanForm'
 import { HostingerImport } from './components/HostingerImport'
 import { RenewalForm } from './components/forms/RenewalForm'
 import { Icon } from './components/Icon'
 import { Sidebar } from './components/Sidebar'
 import { useWorkspaceData } from './hooks/useWorkspaceData'
-import { deleteClient, deleteDomain, deleteRenewal, describeError } from './lib/api'
+import { deleteClient, deleteDomain, deleteHostingPlan, deleteRenewal, describeError } from './lib/api'
 import { supabase } from './lib/supabase'
 import { type PageId } from './navigation'
 import { ClientsPage } from './pages/ClientsPage'
 import { Dashboard } from './pages/Dashboard'
 import { DomainsPage } from './pages/DomainsPage'
+import { HostingPage } from './pages/HostingPage'
 import { RenewalsPage } from './pages/RenewalsPage'
 import { SettingsPage } from './pages/SettingsPage'
-import type { Client, Domain, Renewal } from './types/domain'
+import type { Client, Domain, HostingPlan, Renewal } from './types/domain'
 import { formatDate } from './utils/domainStatus'
 import { formatMoney } from './utils/format'
 
@@ -27,11 +29,20 @@ type Editor =
   | { kind: 'hostinger-import' }
   | { kind: 'client'; client?: Client }
   | { kind: 'renewal'; renewal?: Renewal }
+  | { kind: 'hosting'; plan?: HostingPlan }
 
 type PendingDelete =
   | { kind: 'domain'; item: Domain }
   | { kind: 'client'; item: Client }
   | { kind: 'renewal'; item: Renewal }
+  | { kind: 'hosting'; item: HostingPlan }
+
+const deleteTitles: Record<PendingDelete['kind'], string> = {
+  domain: 'domain',
+  client: 'client',
+  renewal: 'renewal',
+  hosting: 'hosting plan',
+}
 
 export function Workspace({ session }: { session: Session }) {
   const userId = session.user.id
@@ -80,6 +91,11 @@ export function Workspace({ session }: { session: Session }) {
       setNotice(`${request.item.name} still has ${n} domain${n === 1 ? '' : 's'}. Reassign or delete them first.`)
       return
     }
+    if (request.kind === 'client' && request.item.hostingCount > 0) {
+      const n = request.item.hostingCount
+      setNotice(`${request.item.name} still has ${n} hosting plan${n === 1 ? '' : 's'}. Reassign or delete them first.`)
+      return
+    }
     if (request.kind === 'domain' && data) {
       const n = data.renewals.filter((r) => r.domainId === request.item.id).length
       if (n > 0) {
@@ -98,7 +114,12 @@ export function Workspace({ session }: { session: Session }) {
       if (kind === 'domain') await deleteDomain(userId, item.id)
       if (kind === 'client') await deleteClient(userId, item.id)
       if (kind === 'renewal') await deleteRenewal(userId, item.id)
-      setNotice(kind === 'renewal' ? `Deleted renewal for ${item.domainName}.` : `Deleted ${item.name}.`)
+      if (kind === 'hosting') await deleteHostingPlan(userId, item.id)
+      setNotice(
+        kind === 'renewal'
+          ? `Deleted renewal for ${item.domainName}.`
+          : `Deleted ${kind === 'hosting' ? item.planName : item.name}.`,
+      )
       setPendingDelete(null)
       reload()
     } catch (error) {
@@ -150,6 +171,16 @@ export function Workspace({ session }: { session: Session }) {
         onImport={() => setEditor({ kind: 'hostinger-import' })}
         onEdit={editDomain}
         onDelete={(item) => requestDelete({ kind: 'domain', item })}
+      />
+    )
+  } else if (activePage === 'hosting') {
+    content = (
+      <HostingPage
+        plans={state.data.hostingPlans}
+        unavailable={state.data.hostingError}
+        onAdd={() => setEditor({ kind: 'hosting' })}
+        onEdit={(plan) => setEditor({ kind: 'hosting', plan })}
+        onDelete={(item) => requestDelete({ kind: 'hosting', item })}
       />
     )
   } else if (activePage === 'clients') {
@@ -220,6 +251,16 @@ export function Workspace({ session }: { session: Session }) {
       {data && editor?.kind === 'client' && (
         <ClientForm userId={userId} client={editor.client} onSaved={handleSaved} onClose={() => setEditor(null)} />
       )}
+      {data && editor?.kind === 'hosting' && (
+        <HostingPlanForm
+          plan={editor.plan}
+          clients={data.clients}
+          domains={data.domains}
+          plans={data.hostingPlans}
+          onSaved={handleSaved}
+          onClose={() => setEditor(null)}
+        />
+      )}
       {data && editor?.kind === 'renewal' && (
         <RenewalForm
           userId={userId}
@@ -232,7 +273,7 @@ export function Workspace({ session }: { session: Session }) {
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        title={`Delete this ${pendingDelete?.kind ?? 'record'}?`}
+        title={`Delete this ${pendingDelete ? deleteTitles[pendingDelete.kind] : 'record'}?`}
         confirmLabel="Delete"
         busy={deleting}
         onConfirm={confirmDelete}
@@ -248,6 +289,14 @@ export function Workspace({ session }: { session: Session }) {
         {pendingDelete?.kind === 'client' && (
           <p>
             <strong>{pendingDelete.item.name}</strong> will be permanently removed. This action cannot be undone.
+          </p>
+        )}
+        {pendingDelete?.kind === 'hosting' && (
+          <p>
+            <strong>{pendingDelete.item.planName}</strong> ({pendingDelete.item.provider}) will be permanently removed.
+            {pendingDelete.item.domainNames.length > 0 &&
+              ` Its ${pendingDelete.item.domainNames.length} linked domain${pendingDelete.item.domainNames.length === 1 ? '' : 's'} will be unlinked, not deleted.`}{' '}
+            This action cannot be undone.
           </p>
         )}
         {pendingDelete?.kind === 'renewal' && (

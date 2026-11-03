@@ -1181,6 +1181,56 @@
   accent-color: var(--lavender-fg);
 }
 
+.check-list-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.check-list-field legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.check-list {
+  max-height: 200px;
+  margin: 0;
+  padding: 4px 14px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.check-list li + li {
+  border-top: 1px solid var(--line);
+}
+
+.check-list label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+.check-list .field-hint {
+  padding: 8px 0;
+}
+
+.field .check-list input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--lavender-fg);
+}
+
 .form-error {
   margin-top: 16px;
   padding: 10px 14px;

@@ -8,6 +8,15 @@ export function formatMoney(amount: number | null, currency: string): string {
   }
 }
 
+/** Parses an optional, non-negative money amount. undefined means invalid. */
+export function parseAmount(input: string): number | null | undefined {
+  const trimmed = input.trim().replace(/,/g, '')
+  if (trimmed === '') return null
+  const n = Number(trimmed)
+  if (!Number.isFinite(n) || n < 0) return undefined
+  return Math.round(n * 100) / 100
+}
+
 /** Sums amounts per currency, so different currencies are never added together. */
 export function sumByCurrency(items: { amount: number | null; currency: string }[]): Map<string, number> {
   const totals = new Map<string, number>()

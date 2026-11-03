@@ -6,7 +6,7 @@ import { Icon } from '../components/Icon'
 import { PageHeader, SearchBox } from '../components/PageHeader'
 import { renewalStatuses, renewalStatusLabels } from '../data/options'
 import type { Renewal, RenewalStatus } from '../types/domain'
-import { daysUntil, formatDate, getExpiryUrgency } from '../utils/domainStatus'
+import { daysUntil, describeDue, formatDate, getExpiryUrgency } from '../utils/domainStatus'
 import { formatMoney, formatTotals, matchesSearch, sumByCurrency } from '../utils/format'
 
 interface RenewalsPageProps {
@@ -22,12 +22,6 @@ const statusBadge: Record<RenewalStatus, string> = {
   invoiced: 'badge-soon',
   paid: 'badge-calm',
   cancelled: 'badge-calm',
-}
-
-function describeDue(days: number): string {
-  if (days < 0) return `Overdue by ${Math.abs(days)} day${days === -1 ? '' : 's'}`
-  if (days === 0) return 'Due today'
-  return `Due in ${days} day${days === 1 ? '' : 's'}`
 }
 
 function margin(r: Renewal): number | null {

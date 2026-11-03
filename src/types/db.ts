@@ -36,6 +36,8 @@ export interface DomainRow {
   /** date (YYYY-MM-DD) */
   registered_date?: string | null
   last_synced_at?: string | null
+  /** From the 20261103 migration; absent before it. */
+  hosting_plan_id?: string | null
   created_at: string
   updated_at: string | null
 }
@@ -56,6 +58,25 @@ export interface RenewalRow {
   created_at: string
 }
 
+export interface HostingPlanRow {
+  id: string
+  client_id: string | null
+  provider: string
+  plan_name: string
+  /** date (YYYY-MM-DD) */
+  start_date: string | null
+  /** date (YYYY-MM-DD) */
+  renewal_date: string | null
+  /** numeric: what the provider charges us */
+  hosting_cost: number | string | null
+  /** numeric: what we bill the client */
+  client_charge: number | string | null
+  currency: string | null
+  auto_renew: boolean
+  status: string
+  notes: string | null
+}
+
 /** Columns the app writes. user_id is always set from the signed-in session. */
 export type ClientInput = Pick<ClientRow, 'name' | 'contact_name' | 'email' | 'phone' | 'notes'>
 export type DomainInput = Pick<
@@ -66,3 +87,4 @@ export type RenewalInput = Pick<
   RenewalRow,
   'domain_id' | 'renewal_date' | 'registrar_cost' | 'client_charge' | 'currency' | 'status' | 'notes'
 >
+export type HostingPlanInput = Omit<HostingPlanRow, 'id'>

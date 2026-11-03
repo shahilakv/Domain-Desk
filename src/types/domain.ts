@@ -23,6 +23,7 @@ export interface Domain {
   ownershipType: OwnershipType
   /** Set when the row is linked to a registrar import, e.g. 'hostinger'. */
   provider: string | null
+  hostingPlanId: string | null
 }
 
 /** Status shown in the UI, derived from expiry date and payment status. */
@@ -36,6 +37,7 @@ export interface Client {
   phone: string
   notes: string
   domainCount: number
+  hostingCount: number
 }
 
 /** Stored in domain_renewals.status. Keep in sync with the SQL migration. */
@@ -55,4 +57,29 @@ export interface Renewal {
   currency: string
   status: RenewalStatus
   notes: string
+}
+
+/** Stored in hosting_plans.status. Keep in sync with the SQL migration. */
+export type HostingStatus = 'active' | 'suspended' | 'cancelled'
+
+export interface HostingPlan {
+  id: string
+  provider: string
+  planName: string
+  clientId: string | null
+  /** Client display name, or an empty string when unassigned. */
+  client: string
+  /** ISO date strings (YYYY-MM-DD), or null when not recorded. */
+  startDate: string | null
+  renewalDate: string | null
+  /** What the provider charges. Kept separate from the client charge. */
+  hostingCost: number | null
+  /** What the client is billed. */
+  clientCharge: number | null
+  currency: string
+  autoRenew: boolean
+  status: HostingStatus
+  notes: string
+  /** Names of the domains linked through domains.hosting_plan_id. */
+  domainNames: string[]
 }

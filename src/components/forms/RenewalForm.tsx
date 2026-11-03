@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { DEFAULT_CURRENCY, renewalStatuses } from '../../data/options'
 import { describeError, saveRenewal } from '../../lib/api'
 import type { Domain, Renewal, RenewalStatus } from '../../types/domain'
-import { formatMoney, nullIfEmpty } from '../../utils/format'
+import { formatMoney, nullIfEmpty, parseAmount } from '../../utils/format'
 import { Field, FormDialog } from '../FormDialog'
 
 interface RenewalFormProps {
@@ -11,15 +11,6 @@ interface RenewalFormProps {
   domains: Domain[]
   onSaved: (message: string) => void
   onClose: () => void
-}
-
-/** Parses an optional, non-negative money amount. undefined means invalid. */
-function parseAmount(input: string): number | null | undefined {
-  const trimmed = input.trim().replace(/,/g, '')
-  if (trimmed === '') return null
-  const n = Number(trimmed)
-  if (!Number.isFinite(n) || n < 0) return undefined
-  return Math.round(n * 100) / 100
 }
 
 export function RenewalForm({ userId, renewal, domains, onSaved, onClose }: RenewalFormProps) {

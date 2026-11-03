@@ -1,4 +1,4 @@
-import type { DomainLifecycle, OwnershipType, RenewalStatus } from '../types/domain'
+import type { DomainLifecycle, HostingStatus, OwnershipType, RenewalStatus } from '../types/domain'
 
 /*
  * Allowed values for the free-text status columns. The SQL migration in
@@ -36,6 +36,18 @@ export const renewalStatusLabels: Record<RenewalStatus, string> = {
 export const lifecycleLabels: Record<DomainLifecycle, string> = {
   active: 'Active',
   transferred: 'Transferred out',
+  cancelled: 'Cancelled',
+}
+
+export const hostingStatuses: { value: HostingStatus; label: string }[] = [
+  { value: 'active', label: 'Active' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'cancelled', label: 'Cancelled' },
+]
+
+export const hostingStatusLabels: Record<HostingStatus, string> = {
+  active: 'Active',
+  suspended: 'Suspended',
   cancelled: 'Cancelled',
 }
 

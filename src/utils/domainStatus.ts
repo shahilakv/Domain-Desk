@@ -88,6 +88,13 @@ export function formatDate(iso: string | null): string {
   })
 }
 
+/** Countdown for a renewal or payment date. */
+export function describeDue(days: number): string {
+  if (days < 0) return `Overdue by ${Math.abs(days)} day${days === -1 ? '' : 's'}`
+  if (days === 0) return 'Due today'
+  return `Due in ${days} day${days === 1 ? '' : 's'}`
+}
+
 export function describeExpiry(days: number): string {
   if (!Number.isFinite(days)) return 'No expiry date'
   if (days < 0) return `Expired ${Math.abs(days)} day${days === -1 ? '' : 's'} ago`

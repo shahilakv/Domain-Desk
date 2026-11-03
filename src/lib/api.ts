@@ -1,6 +1,24 @@
 import { DEFAULT_CURRENCY, DEFAULT_OWNERSHIP } from '../data/options'
-import type { ClientInput, ClientRow, DomainInput, DomainRow, RenewalInput, RenewalRow } from '../types/db'
-import type { Client, Domain, DomainLifecycle, OwnershipType, Renewal, RenewalStatus } from '../types/domain'
+import type {
+  ClientInput,
+  ClientRow,
+  DomainInput,
+  DomainRow,
+  HostingPlanInput,
+  HostingPlanRow,
+  RenewalInput,
+  RenewalRow,
+} from '../types/db'
+import type {
+  Client,
+  Domain,
+  DomainLifecycle,
+  HostingPlan,
+  HostingStatus,
+  OwnershipType,
+  Renewal,
+  RenewalStatus,
+} from '../types/domain'
 import { supabase } from './supabase'
 
 /*
@@ -13,6 +31,9 @@ export interface WorkspaceData {
   clients: Client[]
   domains: Domain[]
   renewals: Renewal[]
+  hostingPlans: HostingPlan[]
+  /** Why hosting plans could not be loaded (e.g. migration not applied); null when they loaded. */
+  hostingError: string | null
 }
 
 interface DbError {
@@ -39,7 +60,9 @@ export function describeError(error: unknown): string {
     case 'PGRST303':
       return 'Your session has expired. Please sign in again.'
     case '42703':
+    case '42P01':
     case 'PGRST204':
+    case 'PGRST205':
       return 'The database schema does not match the app. Check the Supabase migration.'
   }
   if (error instanceof TypeError || err.message === 'Failed to fetch') {
@@ -69,8 +92,26 @@ function asRenewalStatus(value: string | null): RenewalStatus {
   return renewalStatusValues.includes(value as RenewalStatus) ? (value as RenewalStatus) : 'scheduled'
 }
 
+const hostingStatusValues: HostingStatus[] = ['active', 'suspended', 'cancelled']
+
+function asHostingStatus(value: string | null): HostingStatus {
+  return hostingStatusValues.includes(value as HostingStatus) ? (value as HostingStatus) : 'active'
+}
+
+/** Only the columns the app uses. */
+const HOSTING_COLUMNS =
+  'id, client_id, provider, plan_name, start_date, renewal_date, hosting_cost, client_charge, currency, auto_renew, status, notes'
+
+/** The hosting_plans table does not exist yet (migration not applied). */
+function isMissingTable(error: { code?: string }): boolean {
+  return error.code === 'PGRST205' || error.code === '42P01'
+}
+
+export const HOSTING_MIGRATION_MESSAGE =
+  'Hosting plans need a one-time database update (supabase/migrations/20261103000000_hosting_plans.sql). Apply it in Supabase, then reload.'
+
 export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
-  const [clientsRes, domainsRes, renewalsRes] = await Promise.all([
+  const [clientsRes, domainsRes, renewalsRes, hostingRes] = await Promise.all([
     supabase.from('clients').select('*').eq('user_id', userId).order('name'),
     supabase.from('domains').select('*').eq('user_id', userId).order('domain_name'),
     supabase
@@ -78,19 +119,41 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       .select('*')
       .eq('user_id', userId)
       .order('renewal_date', { ascending: false, nullsFirst: false }),
+    supabase
+      .from('hosting_plans')
+      .select(HOSTING_COLUMNS)
+      .eq('user_id', userId)
+      .order('renewal_date', { ascending: true, nullsFirst: false }),
   ])
   if (clientsRes.error) throw clientsRes.error
   if (domainsRes.error) throw domainsRes.error
   if (renewalsRes.error) throw renewalsRes.error
+  // A hosting problem (e.g. migration not applied) never blocks the rest of the workspace.
+  const hostingError = hostingRes.error
+    ? isMissingTable(hostingRes.error)
+      ? HOSTING_MIGRATION_MESSAGE
+      : describeError(hostingRes.error)
+    : null
 
   const clientRows = clientsRes.data as ClientRow[]
   const domainRows = domainsRes.data as DomainRow[]
   const renewalRows = renewalsRes.data as RenewalRow[]
+  const hostingRows = (hostingRes.data ?? []) as HostingPlanRow[]
 
   const clientNames = new Map(clientRows.map((c) => [c.id, c.name]))
   const domainCounts = new Map<string, number>()
+  const domainNamesByPlan = new Map<string, string[]>()
   for (const d of domainRows) {
     if (d.client_id) domainCounts.set(d.client_id, (domainCounts.get(d.client_id) ?? 0) + 1)
+    if (d.hosting_plan_id) {
+      const names = domainNamesByPlan.get(d.hosting_plan_id)
+      if (names) names.push(d.domain_name)
+      else domainNamesByPlan.set(d.hosting_plan_id, [d.domain_name])
+    }
+  }
+  const hostingCounts = new Map<string, number>()
+  for (const h of hostingRows) {
+    if (h.client_id) hostingCounts.set(h.client_id, (hostingCounts.get(h.client_id) ?? 0) + 1)
   }
   const unpaidDomains = new Set(renewalRows.filter((r) => r.status === 'invoiced').map((r) => r.domain_id))
 
@@ -107,6 +170,7 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
     notes: d.notes ?? '',
     ownershipType: asOwnership(d.ownership_type),
     provider: d.provider ?? null,
+    hostingPlanId: d.hosting_plan_id ?? null,
   }))
   const domainsById = new Map(domains.map((d) => [d.id, d]))
 
@@ -119,6 +183,7 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       phone: c.phone ?? '',
       notes: c.notes ?? '',
       domainCount: domainCounts.get(c.id) ?? 0,
+      hostingCount: hostingCounts.get(c.id) ?? 0,
     })),
     domains,
     renewals: renewalRows.map((r) => {
@@ -136,10 +201,27 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
         notes: r.notes ?? '',
       }
     }),
+    hostingPlans: hostingRows.map((h) => ({
+      id: h.id,
+      provider: h.provider,
+      planName: h.plan_name,
+      clientId: h.client_id,
+      client: (h.client_id && clientNames.get(h.client_id)) || '',
+      startDate: h.start_date,
+      renewalDate: h.renewal_date,
+      hostingCost: toNumber(h.hosting_cost),
+      clientCharge: toNumber(h.client_charge),
+      currency: h.currency || DEFAULT_CURRENCY,
+      autoRenew: h.auto_renew,
+      status: asHostingStatus(h.status),
+      notes: h.notes ?? '',
+      domainNames: domainNamesByPlan.get(h.id) ?? [],
+    })),
+    hostingError,
   }
 }
 
-type Table = 'clients' | 'domains' | 'domain_renewals'
+type Table = 'clients' | 'domains' | 'domain_renewals' | 'hosting_plans'
 
 async function insertRow(table: Table, userId: string, values: object): Promise<void> {
   const { error } = await supabase.from(table).insert({ ...values, user_id: userId })
@@ -167,6 +249,33 @@ export const saveDomain = (userId: string, values: DomainInput, id?: string) =>
 
 export const saveRenewal = (userId: string, values: RenewalInput, id?: string) =>
   id ? updateRow('domain_renewals', userId, id, values) : insertRow('domain_renewals', userId, values)
+
+/**
+ * Saves a plan and the complete set of domains it covers in one request. The
+ * database function runs as the signed-in user (RLS applies) inside a single
+ * transaction, so the plan and its links are saved together or not at all.
+ */
+export async function saveHostingPlan(values: HostingPlanInput, domainIds: string[], id?: string): Promise<void> {
+  const { error } = await supabase.rpc('dd_save_hosting_plan', {
+    p_id: id ?? null,
+    p_provider: values.provider,
+    p_plan_name: values.plan_name,
+    p_client_id: values.client_id,
+    p_start_date: values.start_date,
+    p_renewal_date: values.renewal_date,
+    p_hosting_cost: values.hosting_cost,
+    p_client_charge: values.client_charge,
+    p_currency: values.currency,
+    p_auto_renew: values.auto_renew,
+    p_status: values.status,
+    p_notes: values.notes,
+    p_domain_ids: domainIds,
+  })
+  if (error) throw error
+}
+
+/** Linked domains are unlinked by the database (ON DELETE SET NULL), never deleted. */
+export const deleteHostingPlan = (userId: string, id: string) => deleteRow('hosting_plans', userId, id)
 
 export const deleteClient = (userId: string, id: string) => deleteRow('clients', userId, id)
 export const deleteDomain = (userId: string, id: string) => deleteRow('domains', userId, id)

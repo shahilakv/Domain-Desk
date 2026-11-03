@@ -5,34 +5,39 @@
 select relname as table_name, relrowsecurity as rls_enabled, relforcerowsecurity as rls_forced
 from pg_class
 where relnamespace = 'public'::regnamespace
-  and relname in ('clients', 'domains', 'domain_renewals');
+  and relname in ('clients', 'domains', 'domain_renewals', 'hosting_plans');
 
 -- 2. Policies (look for anything granting access without user_id = auth.uid()).
 select tablename, policyname, permissive, roles, cmd, qual as using_expr, with_check
 from pg_policies
-where schemaname = 'public' and tablename in ('clients', 'domains', 'domain_renewals')
+where schemaname = 'public' and tablename in ('clients', 'domains', 'domain_renewals', 'hosting_plans')
 order by tablename, policyname;
 
 -- 3. Columns, types, nullability, defaults.
 select table_name, column_name, data_type, is_nullable, column_default
 from information_schema.columns
-where table_schema = 'public' and table_name in ('clients', 'domains', 'domain_renewals')
+where table_schema = 'public' and table_name in ('clients', 'domains', 'domain_renewals', 'hosting_plans')
 order by table_name, ordinal_position;
 
 -- 4. Constraints, including CHECK lists and foreign-key ON DELETE behaviour.
 select conrelid::regclass as table_name, conname, pg_get_constraintdef(oid) as definition
 from pg_constraint
-where conrelid in ('public.clients'::regclass, 'public.domains'::regclass, 'public.domain_renewals'::regclass)
+where conrelid in (select to_regclass(t) from unnest(array['public.clients', 'public.domains', 'public.domain_renewals', 'public.hosting_plans']) as t)
 order by 1, 2;
 
 -- 5. Table privileges for the API roles.
 select table_name, grantee, string_agg(privilege_type, ', ' order by privilege_type) as privileges
 from information_schema.role_table_grants
 where table_schema = 'public'
-  and table_name in ('clients', 'domains', 'domain_renewals')
+  and table_name in ('clients', 'domains', 'domain_renewals', 'hosting_plans')
   and grantee in ('anon', 'authenticated')
 group by 1, 2
 order by 1, 2;
+
+-- 5b. The hosting plan save function (after the hosting migration): must be SECURITY INVOKER (prosecdef = false).
+select p.oid::regprocedure as function, p.prosecdef as security_definer, p.proconfig as settings
+from pg_proc p
+where p.pronamespace = 'public'::regnamespace and p.proname = 'dd_save_hosting_plan';
 
 -- 6. Simulate another signed-in user: every count must be 0.
 -- (Runs inside a transaction that is rolled back.)
@@ -43,4 +48,5 @@ select
   (select count(*) from public.clients)         as clients_visible,
   (select count(*) from public.domains)         as domains_visible,
   (select count(*) from public.domain_renewals) as renewals_visible;
+-- After the hosting migration, also run: select count(*) from public.hosting_plans;  (must be 0)
 rollback;
