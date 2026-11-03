@@ -56,10 +56,11 @@ export class HostingerImportError extends Error {
   }
 }
 
-async function invoke<T>(body: object): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<T>(FUNCTION_NAME, { body })
+/** Calls one of DomainDesk's Edge Functions and turns its JSON errors into HostingerImportError. */
+export async function invokeEdgeFunction<T>(name: string, body: object): Promise<T> {
+  const { data, error } = await supabase.functions.invoke<T>(name, { body })
   if (!error) {
-    if (data === null) throw new HostingerImportError('empty_response', 'The import service returned no data.')
+    if (data === null) throw new HostingerImportError('empty_response', 'The service returned no data.')
     return data
   }
   if (error instanceof FunctionsHttpError) {
@@ -77,19 +78,21 @@ async function invoke<T>(body: object): Promise<T> {
     if (res.status === 404) {
       throw new HostingerImportError(
         'not_deployed',
-        'The hostinger-import Edge Function is not deployed to this Supabase project yet.',
+        `The ${name} Edge Function is not deployed to this Supabase project yet.`,
       )
     }
-    throw new HostingerImportError('error', `The import service returned HTTP ${res.status}.`)
+    throw new HostingerImportError('error', `The ${name} service returned HTTP ${res.status}.`)
   }
   if (error instanceof FunctionsRelayError || error instanceof FunctionsFetchError) {
     throw new HostingerImportError(
       'unreachable',
-      'Could not reach the import service. Check your connection, and that the hostinger-import function is deployed.',
+      `Could not reach the ${name} service. Check your connection, and that the function is deployed.`,
     )
   }
   throw new HostingerImportError('error', error.message || 'Something went wrong. Please try again.')
 }
+
+const invoke = <T>(body: object) => invokeEdgeFunction<T>(FUNCTION_NAME, body)
 
 export const fetchHostingerPreview = () => invoke<HostingerPreview>({ action: 'preview' })
 

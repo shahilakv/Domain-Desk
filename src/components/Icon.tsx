@@ -103,6 +103,12 @@ const paths = {
       <path d="M12 11v5M12 8h.01" />
     </>
   ),
+  bell: (
+    <>
+      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" />
+      <path d="M10 20.5a2.2 2.2 0 0 0 4 0" />
+    </>
+  ),
 } as const
 
 export type IconName = keyof typeof paths

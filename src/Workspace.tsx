@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from './components/Button'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { LogoMark } from './components/Decorations'
@@ -12,18 +12,27 @@ import { RenewalForm } from './components/forms/RenewalForm'
 import { Icon } from './components/Icon'
 import { Sidebar } from './components/Sidebar'
 import { useWorkspaceData } from './hooks/useWorkspaceData'
-import { deleteClient, deleteDomain, deleteHostingPlan, deleteRenewal, describeError } from './lib/api'
+import {
+  deleteClient,
+  deleteDomain,
+  deleteHostingPlan,
+  deleteRenewal,
+  describeError,
+  requestNotificationRetry,
+} from './lib/api'
 import { supabase } from './lib/supabase'
 import { type PageId } from './navigation'
 import { ClientsPage } from './pages/ClientsPage'
 import { Dashboard } from './pages/Dashboard'
 import { DomainsPage } from './pages/DomainsPage'
 import { HostingPage } from './pages/HostingPage'
+import { NotificationsPage } from './pages/NotificationsPage'
 import { RenewalsPage } from './pages/RenewalsPage'
 import { SettingsPage } from './pages/SettingsPage'
-import type { Client, Domain, HostingPlan, Renewal } from './types/domain'
+import type { Client, Domain, HostingPlan, NotificationLogEntry, Renewal } from './types/domain'
 import { formatDate } from './utils/domainStatus'
 import { formatMoney } from './utils/format'
+import { reminderSummary } from './utils/reminders'
 
 type Editor =
   | { kind: 'domain'; domain?: Domain }
@@ -85,6 +94,21 @@ export function Workspace({ session }: { session: Session }) {
   }
 
   const data = state.status === 'ready' ? state.data : null
+
+  const reminderStats = useMemo(
+    () => (data && !data.notificationsError ? reminderSummary(data.notificationSettings, data) : null),
+    [data],
+  )
+
+  const retryNotification = async (entry: NotificationLogEntry) => {
+    try {
+      await requestNotificationRetry(userId, entry.id)
+      setNotice('Retry requested. It will be sent on the next hourly run.')
+      reload()
+    } catch (error) {
+      setNotice(`Retry failed: ${describeError(error)}`)
+    }
+  }
 
   /** Deleting a parent with linked rows is blocked instead of relying on FK cascade behaviour. */
   const requestDelete = (request: PendingDelete) => {
@@ -171,6 +195,26 @@ export function Workspace({ session }: { session: Session }) {
         onViewAllDomains={() => navigate('domains')}
         onEditDomain={editDomain}
         onDeleteDomain={(item) => requestDelete({ kind: 'domain', item })}
+        reminders={reminderStats}
+        onViewNotifications={() => navigate('notifications')}
+      />
+    )
+  } else if (activePage === 'notifications') {
+    content = (
+      <NotificationsPage
+        userId={userId}
+        settings={state.data.notificationSettings}
+        notifications={state.data.notifications}
+        unavailable={state.data.notificationsError}
+        renewals={state.data.renewals}
+        domains={state.data.domains}
+        hostingPlans={state.data.hostingPlans}
+        clients={state.data.clients}
+        onSaved={(message) => {
+          setNotice(message)
+          reload()
+        }}
+        onRetry={retryNotification}
       />
     )
   } else if (activePage === 'domains') {
@@ -267,7 +311,13 @@ export function Workspace({ session }: { session: Session }) {
         <HostingerHostingImport onImported={reload} onClose={() => setEditor(null)} />
       )}
       {data && editor?.kind === 'client' && (
-        <ClientForm userId={userId} client={editor.client} onSaved={handleSaved} onClose={() => setEditor(null)} />
+        <ClientForm
+          userId={userId}
+          client={editor.client}
+          remindersAvailable={data.notificationsError === null}
+          onSaved={handleSaved}
+          onClose={() => setEditor(null)}
+        />
       )}
       {data && editor?.kind === 'hosting' && (
         <HostingPlanForm

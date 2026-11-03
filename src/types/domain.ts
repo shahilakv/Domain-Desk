@@ -38,6 +38,11 @@ export interface Client {
   notes: string
   domainCount: number
   hostingCount: number
+  /** Reminder preferences (20261106 migration). Email is opt-out, WhatsApp opt-in. */
+  emailReminders: boolean
+  whatsappNumber: string
+  whatsappOptIn: boolean
+  whatsappOptInAt: string | null
 }
 
 /** Stored in domain_renewals.status. Keep in sync with the SQL migration. */
@@ -67,6 +72,33 @@ export interface Renewal {
   currency: string
   status: RenewalStatus
   notes: string
+}
+
+export type NotificationChannel = 'email' | 'whatsapp'
+/** accepted = the provider took it; delivered/read only come from provider webhooks. */
+export type NotificationStatus = 'pending' | 'accepted' | 'delivered' | 'read' | 'failed'
+
+export interface NotificationLogEntry {
+  id: string
+  renewalId: string | null
+  channel: NotificationChannel
+  /** Days before the renewal date (negative = overdue). */
+  stage: number
+  dueDate: string
+  targetKind: RenewalKind
+  targetName: string
+  clientName: string
+  recipient: string
+  amount: number | null
+  currency: string | null
+  status: NotificationStatus
+  retryable: boolean
+  attempts: number
+  nextAttemptAt: string | null
+  retryRequested: boolean
+  error: string
+  createdAt: string
+  sentAt: string | null
 }
 
 /** Stored in hosting_plans.status. Keep in sync with the SQL migration. */

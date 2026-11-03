@@ -6,6 +6,9 @@ import type {
   DomainRow,
   HostingPlanInput,
   HostingPlanRow,
+  NotificationLogRow,
+  NotificationSettingsInput,
+  NotificationSettingsRow,
   RenewalInput,
   RenewalRow,
 } from '../types/db'
@@ -15,6 +18,9 @@ import type {
   DomainLifecycle,
   HostingPlan,
   HostingStatus,
+  NotificationChannel,
+  NotificationLogEntry,
+  NotificationStatus,
   OwnershipType,
   Renewal,
   RenewalStatus,
@@ -34,6 +40,12 @@ export interface WorkspaceData {
   hostingPlans: HostingPlan[]
   /** Why hosting plans could not be loaded (e.g. migration not applied); null when they loaded. */
   hostingError: string | null
+  /** Reminder settings; null until saved for the first time. */
+  notificationSettings: NotificationSettingsRow | null
+  /** Most recent reminders first. */
+  notifications: NotificationLogEntry[]
+  /** Why reminders could not be loaded (e.g. migration not applied); null when they loaded. */
+  notificationsError: string | null
 }
 
 interface DbError {
@@ -133,8 +145,40 @@ export function isMissingColumn(error: unknown): boolean {
   return code === 'PGRST204' || code === '42703'
 }
 
+export const REMINDERS_MIGRATION_MESSAGE =
+  'Reminders need a one-time database update (supabase/migrations/20261106000000_renewal_reminders.sql). Apply it in Supabase, then reload.'
+
+const NOTIFICATION_HISTORY_LIMIT = 300
+const NOTIFICATION_COLUMNS =
+  'id, renewal_id, channel, stage, due_date, target_kind, target_name, client_id, client_name, recipient, amount, currency, status, retryable, attempts, last_attempt_at, next_attempt_at, retry_requested_at, error, created_at, sent_at'
+const notificationStatuses: NotificationStatus[] = ['pending', 'accepted', 'delivered', 'read', 'failed']
+
+function toLogEntry(r: NotificationLogRow): NotificationLogEntry {
+  return {
+    id: r.id,
+    renewalId: r.renewal_id,
+    channel: (r.channel === 'whatsapp' ? 'whatsapp' : 'email') as NotificationChannel,
+    stage: r.stage,
+    dueDate: r.due_date,
+    targetKind: r.target_kind === 'hosting' ? 'hosting' : 'domain',
+    targetName: r.target_name,
+    clientName: r.client_name ?? '',
+    recipient: r.recipient,
+    amount: toNumber(r.amount),
+    currency: r.currency,
+    status: notificationStatuses.includes(r.status as NotificationStatus) ? (r.status as NotificationStatus) : 'pending',
+    retryable: r.retryable,
+    attempts: r.attempts,
+    nextAttemptAt: r.next_attempt_at,
+    retryRequested: Boolean(r.retry_requested_at && (!r.last_attempt_at || r.retry_requested_at > r.last_attempt_at)),
+    error: r.error ?? '',
+    createdAt: r.created_at,
+    sentAt: r.sent_at,
+  }
+}
+
 export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
-  const [clientsRes, domainsRes, renewalsRes, hostingRes] = await Promise.all([
+  const [clientsRes, domainsRes, renewalsRes, hostingRes, settingsRes, logRes] = await Promise.all([
     supabase.from('clients').select('*').eq('user_id', userId).order('name'),
     supabase.from('domains').select('*').eq('user_id', userId).order('domain_name'),
     supabase
@@ -143,6 +187,13 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       .eq('user_id', userId)
       .order('renewal_date', { ascending: false, nullsFirst: false }),
     fetchHostingPlans(userId),
+    supabase.from('notification_settings').select('*').eq('user_id', userId).maybeSingle(),
+    supabase
+      .from('notification_log')
+      .select(NOTIFICATION_COLUMNS)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(NOTIFICATION_HISTORY_LIMIT),
   ])
   if (clientsRes.error) throw clientsRes.error
   if (domainsRes.error) throw domainsRes.error
@@ -152,6 +203,14 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
     ? isMissingTable(hostingRes.error)
       ? HOSTING_MIGRATION_MESSAGE
       : describeError(hostingRes.error)
+    : null
+
+  // Like hosting: a reminders problem never blocks the rest of the workspace.
+  const notificationsFailure = settingsRes.error ?? logRes.error
+  const notificationsError = notificationsFailure
+    ? isMissingTable(notificationsFailure)
+      ? REMINDERS_MIGRATION_MESSAGE
+      : describeError(notificationsFailure)
     : null
 
   const clientRows = clientsRes.data as ClientRow[]
@@ -207,6 +266,10 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       notes: c.notes ?? '',
       domainCount: domainCounts.get(c.id) ?? 0,
       hostingCount: hostingCounts.get(c.id) ?? 0,
+      emailReminders: c.email_reminders ?? true,
+      whatsappNumber: c.whatsapp_number ?? '',
+      whatsappOptIn: c.whatsapp_opt_in ?? false,
+      whatsappOptInAt: c.whatsapp_opt_in_at ?? null,
     })),
     domains,
     renewals: renewalRows.map((r) => {
@@ -250,10 +313,13 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
       lastSyncedAt: h.last_synced_at ?? null,
     })),
     hostingError,
+    notificationSettings: notificationsError ? null : ((settingsRes.data as NotificationSettingsRow | null) ?? null),
+    notifications: notificationsError ? [] : ((logRes.data ?? []) as unknown as NotificationLogRow[]).map(toLogEntry),
+    notificationsError,
   }
 }
 
-type Table = 'clients' | 'domains' | 'domain_renewals' | 'hosting_plans'
+type Table = 'clients' | 'domains' | 'domain_renewals' | 'hosting_plans' | 'notification_log'
 
 async function insertRow(table: Table, userId: string, values: object): Promise<void> {
   const { error } = await supabase.from(table).insert({ ...values, user_id: userId })
@@ -308,6 +374,16 @@ export async function saveHostingPlan(values: HostingPlanInput, domainIds: strin
 
 /** Linked domains are unlinked by the database (ON DELETE SET NULL), never deleted. */
 export const deleteHostingPlan = (userId: string, id: string) => deleteRow('hosting_plans', userId, id)
+
+/** Creates or replaces the signed-in user's reminder settings. */
+export async function saveNotificationSettings(userId: string, values: NotificationSettingsInput): Promise<void> {
+  const { error } = await supabase.from('notification_settings').upsert({ ...values, user_id: userId }, { onConflict: 'user_id' })
+  if (error) throw error
+}
+
+/** Asks the next scheduled run to resend a failed reminder (RLS allows only this column, only on failed rows). */
+export const requestNotificationRetry = (userId: string, id: string) =>
+  updateRow('notification_log', userId, id, { retry_requested_at: new Date().toISOString() })
 
 export const deleteClient = (userId: string, id: string) => deleteRow('clients', userId, id)
 export const deleteDomain = (userId: string, id: string) => deleteRow('domains', userId, id)

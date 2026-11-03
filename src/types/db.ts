@@ -11,6 +11,11 @@ export interface ClientRow {
   email: string | null
   phone: string | null
   notes: string | null
+  /* From the 20261106 migration (reminders); absent before it. */
+  email_reminders?: boolean
+  whatsapp_number?: string | null
+  whatsapp_opt_in?: boolean
+  whatsapp_opt_in_at?: string | null
   created_at: string
   updated_at: string | null
 }
@@ -83,8 +88,53 @@ export interface HostingPlanRow {
   last_synced_at?: string | null
 }
 
+export interface NotificationSettingsRow {
+  user_id: string
+  email_enabled: boolean
+  whatsapp_enabled: boolean
+  reminder_days: number[]
+  send_hour: number
+  timezone: string
+  sender_name: string | null
+  sender_email: string | null
+  reply_to_email: string | null
+  agency_name: string | null
+  agency_email: string | null
+  agency_phone: string | null
+  agency_website: string | null
+  payment_instructions: string | null
+  whatsapp_template_name: string | null
+  whatsapp_template_language: string
+}
+
+export interface NotificationLogRow {
+  id: string
+  renewal_id: string | null
+  channel: string
+  stage: number
+  due_date: string
+  target_kind: string
+  target_name: string
+  client_id: string | null
+  client_name: string | null
+  recipient: string
+  amount: number | string | null
+  currency: string | null
+  status: string
+  retryable: boolean
+  attempts: number
+  last_attempt_at: string | null
+  next_attempt_at: string | null
+  retry_requested_at: string | null
+  error: string | null
+  created_at: string
+  sent_at: string | null
+}
+
 /** Columns the app writes. user_id is always set from the signed-in session. */
-export type ClientInput = Pick<ClientRow, 'name' | 'contact_name' | 'email' | 'phone' | 'notes'>
+export type ClientInput = Pick<ClientRow, 'name' | 'contact_name' | 'email' | 'phone' | 'notes'> &
+  Partial<Pick<ClientRow, 'email_reminders' | 'whatsapp_number' | 'whatsapp_opt_in' | 'whatsapp_opt_in_at'>>
+export type NotificationSettingsInput = Omit<NotificationSettingsRow, 'user_id'>
 export type DomainInput = Pick<
   DomainRow,
   'client_id' | 'domain_name' | 'registrar' | 'expiry_date' | 'status' | 'auto_renew' | 'notes' | 'ownership_type'

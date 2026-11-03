@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Button } from '../components/Button'
 import { CubeCluster, Gem } from '../components/Decorations'
+import { Icon } from '../components/Icon'
 import { NeedsAttention } from '../components/NeedsAttention'
 import { SummaryCard } from '../components/SummaryCard'
 import { UpcomingExpiries } from '../components/UpcomingExpiries'
@@ -58,9 +59,21 @@ interface DashboardProps {
   onViewAllDomains: () => void
   onEditDomain: (domain: Domain) => void
   onDeleteDomain: (domain: Domain) => void
+  /** Reminder activity; null hides the section (reminders not set up or unavailable). */
+  reminders?: { upcoming: number; blocked: number; sent: number; failed: number } | null
+  onViewNotifications?: () => void
 }
 
-export function Dashboard({ domains, renewals, onAddDomain, onViewAllDomains, onEditDomain, onDeleteDomain }: DashboardProps) {
+export function Dashboard({
+  domains,
+  renewals,
+  onAddDomain,
+  onViewAllDomains,
+  onEditDomain,
+  onDeleteDomain,
+  reminders,
+  onViewNotifications,
+}: DashboardProps) {
   const { stats, attention, upcoming } = useMemo(() => {
     // Transferred or cancelled domains no longer need renewing.
     const active = domains.filter((d) => d.lifecycle === 'active')
@@ -123,6 +136,45 @@ export function Dashboard({ domains, renewals, onAddDomain, onViewAllDomains, on
         />
         <SummaryCard label="Expired Domains" value={stats.expired} icon="alert" tone="coral" />
       </section>
+
+      {reminders && (
+        <section className="card section-card reminders-card" aria-labelledby="reminders-summary-title">
+          <header className="section-header">
+            <div className="section-title">
+              <span className="icon-chip tone-sky">
+                <Icon name="bell" />
+              </span>
+              <div>
+                <h2 id="reminders-summary-title">Renewal reminders</h2>
+                <p className="section-subtitle">Email and WhatsApp reminders to clients</p>
+              </div>
+            </div>
+            {onViewNotifications && (
+              <Button variant="secondary" onClick={onViewNotifications}>
+                View notifications
+              </Button>
+            )}
+          </header>
+          <dl className="totals-strip">
+            <div>
+              <dt>Due in 7 days</dt>
+              <dd>{reminders.upcoming}</dd>
+            </div>
+            <div>
+              <dt>Can't be sent</dt>
+              <dd>{reminders.blocked}</dd>
+            </div>
+            <div>
+              <dt>Sent, last 7 days</dt>
+              <dd>{reminders.sent}</dd>
+            </div>
+            <div className={reminders.failed > 0 ? 'is-error' : undefined}>
+              <dt>Failed</dt>
+              <dd>{reminders.failed}</dd>
+            </div>
+          </dl>
+        </section>
+      )}
 
       {isPhone ? (
         <>
