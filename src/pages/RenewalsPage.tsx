@@ -5,13 +5,15 @@ import { DomainName } from '../components/DomainName'
 import { Icon } from '../components/Icon'
 import { PageHeader, SearchBox } from '../components/PageHeader'
 import { renewalStatuses, renewalStatusLabels } from '../data/options'
-import type { Renewal, RenewalStatus } from '../types/domain'
+import type { Renewal, RenewalKind, RenewalStatus } from '../types/domain'
 import { daysUntil, describeDue, formatDate, getExpiryUrgency } from '../utils/domainStatus'
 import { formatMoney, formatTotals, matchesSearch, sumByCurrency } from '../utils/format'
 
 interface RenewalsPageProps {
   renewals: Renewal[]
   canAdd: boolean
+  /** Why nothing can be added yet; shown on the disabled Add button. */
+  addHint?: string
   onAdd: () => void
   onEdit: (renewal: Renewal) => void
   onDelete: (renewal: Renewal) => void
@@ -24,22 +26,38 @@ const statusBadge: Record<RenewalStatus, string> = {
   cancelled: 'badge-calm',
 }
 
+const costLabels: Record<RenewalKind | 'all', string> = {
+  all: 'Cost',
+  domain: 'Registrar cost',
+  hosting: 'Hosting cost',
+}
+
 function margin(r: Renewal): number | null {
   return r.clientCharge !== null && r.registrarCost !== null ? r.clientCharge - r.registrarCost : null
 }
 
-export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: RenewalsPageProps) {
+export function RenewalsPage({ renewals, canAdd, addHint, onAdd, onEdit, onDelete }: RenewalsPageProps) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<RenewalStatus | 'all'>('all')
+  const [kind, setKind] = useState<RenewalKind | 'all'>('all')
 
   const visible = useMemo(
     () =>
       renewals.filter(
         (r) =>
+          (kind === 'all' || r.kind === kind) &&
           (status === 'all' || r.status === status) &&
-          matchesSearch(query, r.domainName, r.clientName, r.notes, r.currency, renewalStatusLabels[r.status]),
+          matchesSearch(
+            query,
+            r.targetName,
+            r.provider,
+            r.clientName,
+            r.notes,
+            r.currency,
+            renewalStatusLabels[r.status],
+          ),
       ),
-    [renewals, query, status],
+    [renewals, query, status, kind],
   )
 
   // Totals per currency; registrar cost and client charge stay separate.
@@ -57,9 +75,9 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
       <PageHeader
         eyebrow="Renewals"
         title="Upcoming renewals and invoices."
-        subtitle="Track what each renewal costs you and what you bill the client."
+        subtitle="Track what each domain and hosting renewal costs you and what you bill the client."
         action={
-          <Button icon="plus" onClick={onAdd} disabled={!canAdd} title={canAdd ? undefined : 'Add a domain first'}>
+          <Button icon="plus" onClick={onAdd} disabled={!canAdd} title={canAdd ? undefined : addHint}>
             Add Renewal
           </Button>
         }
@@ -81,6 +99,19 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
             </div>
           </div>
           <div className="toolbar">
+            <label htmlFor="renewal-kind" className="visually-hidden">
+              Filter by type
+            </label>
+            <select
+              id="renewal-kind"
+              className="select-pill"
+              value={kind}
+              onChange={(e) => setKind(e.target.value as RenewalKind | 'all')}
+            >
+              <option value="all">All types</option>
+              <option value="domain">Domains</option>
+              <option value="hosting">Hosting</option>
+            </select>
             <label htmlFor="renewal-filter" className="visually-hidden">
               Filter by status
             </label>
@@ -102,7 +133,7 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
               label="Search renewals"
               value={query}
               onChange={setQuery}
-              placeholder="Search domain or client"
+              placeholder="Search domain, plan or client"
             />
           </div>
         </header>
@@ -110,7 +141,7 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
         {visible.length > 0 && totals.charge && (
           <dl className="totals-strip">
             <div>
-              <dt>Registrar cost</dt>
+              <dt>{costLabels[kind]}</dt>
               <dd>{totals.cost || '—'}</dd>
             </div>
             <div>
@@ -129,7 +160,7 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
             {renewals.length === 0
               ? canAdd
                 ? 'No renewals recorded yet. Add one to track costs and client charges.'
-                : 'Add a domain first, then record its renewals here.'
+                : 'Add a domain or hosting plan first, then record its renewals here.'
               : 'No renewals match your filters.'}
           </p>
         ) : (
@@ -138,9 +169,9 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
               <caption className="visually-hidden">Renewal records</caption>
               <thead>
                 <tr>
-                  <th scope="col">Domain</th>
+                  <th scope="col">Renewal for</th>
                   <th scope="col">Renewal date</th>
-                  <th scope="col">Registrar cost</th>
+                  <th scope="col">{costLabels[kind]}</th>
                   <th scope="col">Client charge</th>
                   <th scope="col">Margin</th>
                   <th scope="col">Status</th>
@@ -157,10 +188,20 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
                   const m = margin(r)
                   return (
                     <tr key={r.id} className={`urgency-${urgency}`}>
-                      <td className="cell-domain">
-                        <DomainName name={r.domainName} />
-                        {r.clientName && <span className="cell-sub">{r.clientName}</span>}
-                      </td>
+                      {r.kind === 'hosting' ? (
+                        <td className="cell-domain cell-wrap">
+                          {r.targetName}
+                          <span className="cell-sub">
+                            Hosting{r.provider && ` · ${r.provider}`}
+                            {r.clientName && ` · ${r.clientName}`}
+                          </span>
+                        </td>
+                      ) : (
+                        <td className="cell-domain">
+                          <DomainName name={r.targetName} />
+                          {r.clientName && <span className="cell-sub">{r.clientName}</span>}
+                        </td>
+                      )}
                       <td className="cell-expiry" data-label="Date">
                         {open && days !== null && <span className="countdown">{describeDue(days)}</span>}
                         <time dateTime={r.renewalDate ?? undefined}>{formatDate(r.renewalDate)}</time>
@@ -179,7 +220,7 @@ export function RenewalsPage({ renewals, canAdd, onAdd, onEdit, onDelete }: Rene
                       </td>
                       <td className="cell-actions">
                         <RowActions
-                          itemName={`renewal for ${r.domainName}`}
+                          itemName={`renewal for ${r.targetName}`}
                           onEdit={() => onEdit(r)}
                           onDelete={() => onDelete(r)}
                         />

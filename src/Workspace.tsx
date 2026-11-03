@@ -96,6 +96,14 @@ export function Workspace({ session }: { session: Session }) {
       setNotice(`${request.item.name} still has ${n} hosting plan${n === 1 ? '' : 's'}. Reassign or delete them first.`)
       return
     }
+    if (request.kind === 'hosting' && data) {
+      // The database also blocks this (ON DELETE RESTRICT), so payment history is never lost.
+      const n = data.renewals.filter((r) => r.hostingPlanId === request.item.id).length
+      if (n > 0) {
+        setNotice(`${request.item.planName} has ${n} renewal record${n === 1 ? '' : 's'}. Delete them on the Renewals page first.`)
+        return
+      }
+    }
     if (request.kind === 'domain' && data) {
       const n = data.renewals.filter((r) => r.domainId === request.item.id).length
       if (n > 0) {
@@ -117,7 +125,7 @@ export function Workspace({ session }: { session: Session }) {
       if (kind === 'hosting') await deleteHostingPlan(userId, item.id)
       setNotice(
         kind === 'renewal'
-          ? `Deleted renewal for ${item.domainName}.`
+          ? `Deleted renewal for ${item.targetName}.`
           : `Deleted ${kind === 'hosting' ? item.planName : item.name}.`,
       )
       setPendingDelete(null)
@@ -196,7 +204,8 @@ export function Workspace({ session }: { session: Session }) {
     content = (
       <RenewalsPage
         renewals={state.data.renewals}
-        canAdd={state.data.domains.length > 0}
+        canAdd={state.data.domains.length > 0 || state.data.hostingPlans.length > 0}
+        addHint="Add a domain or hosting plan first"
         onAdd={() => setEditor({ kind: 'renewal' })}
         onEdit={(renewal) => setEditor({ kind: 'renewal', renewal })}
         onDelete={(item) => requestDelete({ kind: 'renewal', item })}
@@ -266,6 +275,8 @@ export function Workspace({ session }: { session: Session }) {
           userId={userId}
           renewal={editor.renewal}
           domains={data.domains}
+          hostingPlans={data.hostingPlans}
+          hostingUnavailable={data.hostingError}
           onSaved={handleSaved}
           onClose={() => setEditor(null)}
         />
@@ -301,7 +312,7 @@ export function Workspace({ session }: { session: Session }) {
         )}
         {pendingDelete?.kind === 'renewal' && (
           <p>
-            The renewal for <strong>{pendingDelete.item.domainName}</strong> on {formatDate(pendingDelete.item.renewalDate)} (
+            The renewal for <strong>{pendingDelete.item.targetName}</strong> on {formatDate(pendingDelete.item.renewalDate)} (
             {formatMoney(pendingDelete.item.clientCharge, pendingDelete.item.currency)}) will be permanently removed.
           </p>
         )}

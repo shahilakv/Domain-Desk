@@ -43,14 +43,24 @@ export interface Client {
 /** Stored in domain_renewals.status. Keep in sync with the SQL migration. */
 export type RenewalStatus = 'scheduled' | 'invoiced' | 'paid' | 'cancelled'
 
+/** What a renewal record is for. */
+export type RenewalKind = 'domain' | 'hosting'
+
 export interface Renewal {
   id: string
-  domainId: string
-  domainName: string
+  kind: RenewalKind
+  /** Set for domain renewals only. */
+  domainId: string | null
+  /** Set for hosting renewals only. */
+  hostingPlanId: string | null
+  /** Domain name, or the hosting plan name. */
+  targetName: string
+  /** Hosting provider for hosting renewals; empty for domain renewals. */
+  provider: string
   clientName: string
   /** ISO date string (YYYY-MM-DD), or null when not recorded. */
   renewalDate: string | null
-  /** What the registrar charges. Kept separate from the client charge. */
+  /** What the registrar or hosting provider charges. Kept separate from the client charge. */
   registrarCost: number | null
   /** What the client is billed. */
   clientCharge: number | null

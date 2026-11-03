@@ -45,7 +45,10 @@ export interface DomainRow {
 export interface RenewalRow {
   id: string
   user_id: string
-  domain_id: string
+  /** Exactly one of domain_id and hosting_plan_id is set. */
+  domain_id: string | null
+  /** From the 20261104 migration; absent before it. */
+  hosting_plan_id?: string | null
   /** date (YYYY-MM-DD) */
   renewal_date: string | null
   /** numeric: what the registrar charges us */
@@ -83,8 +86,9 @@ export type DomainInput = Pick<
   DomainRow,
   'client_id' | 'domain_name' | 'registrar' | 'expiry_date' | 'status' | 'auto_renew' | 'notes' | 'ownership_type'
 >
-export type RenewalInput = Pick<
-  RenewalRow,
-  'domain_id' | 'renewal_date' | 'registrar_cost' | 'client_charge' | 'currency' | 'status' | 'notes'
->
+type RenewalFields = Pick<RenewalRow, 'renewal_date' | 'registrar_cost' | 'client_charge' | 'currency' | 'status' | 'notes'>
+/** A renewal targets a domain or a hosting plan, never both. */
+export type RenewalInput =
+  | (RenewalFields & { domain_id: string; hosting_plan_id?: never })
+  | (RenewalFields & { hosting_plan_id: string; domain_id?: never })
 export type HostingPlanInput = Omit<HostingPlanRow, 'id'>

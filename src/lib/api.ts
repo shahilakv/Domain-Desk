@@ -110,6 +110,15 @@ function isMissingTable(error: { code?: string }): boolean {
 export const HOSTING_MIGRATION_MESSAGE =
   'Hosting plans need a one-time database update (supabase/migrations/20261103000000_hosting_plans.sql). Apply it in Supabase, then reload.'
 
+export const HOSTING_RENEWALS_MIGRATION_MESSAGE =
+  'Hosting renewals need a one-time database update (supabase/migrations/20261104000000_hosting_renewals.sql). Apply it in Supabase, then try again.'
+
+/** The domain_renewals.hosting_plan_id column does not exist yet (migration not applied). */
+export function isMissingColumn(error: unknown): boolean {
+  const code = (error as DbError | null)?.code
+  return code === 'PGRST204' || code === '42703'
+}
+
 export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
   const [clientsRes, domainsRes, renewalsRes, hostingRes] = await Promise.all([
     supabase.from('clients').select('*').eq('user_id', userId).order('name'),
@@ -155,7 +164,10 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
   for (const h of hostingRows) {
     if (h.client_id) hostingCounts.set(h.client_id, (hostingCounts.get(h.client_id) ?? 0) + 1)
   }
-  const unpaidDomains = new Set(renewalRows.filter((r) => r.status === 'invoiced').map((r) => r.domain_id))
+  // Only domain renewals mark a domain as payment pending; hosting renewals have no domain_id.
+  const unpaidDomains = new Set(
+    renewalRows.filter((r) => r.status === 'invoiced' && r.domain_id).map((r) => r.domain_id),
+  )
 
   const domains: Domain[] = domainRows.map((d) => ({
     id: d.id,
@@ -173,6 +185,7 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
     hostingPlanId: d.hosting_plan_id ?? null,
   }))
   const domainsById = new Map(domains.map((d) => [d.id, d]))
+  const plansById = new Map(hostingRows.map((h) => [h.id, h]))
 
   return {
     clients: clientRows.map((c) => ({
@@ -187,12 +200,19 @@ export async function fetchWorkspace(userId: string): Promise<WorkspaceData> {
     })),
     domains,
     renewals: renewalRows.map((r) => {
-      const domain = domainsById.get(r.domain_id)
+      const hostingPlanId = r.hosting_plan_id ?? null
+      const plan = hostingPlanId ? plansById.get(hostingPlanId) : undefined
+      const domain = r.domain_id ? domainsById.get(r.domain_id) : undefined
       return {
         id: r.id,
+        kind: hostingPlanId ? 'hosting' : 'domain',
         domainId: r.domain_id,
-        domainName: domain?.name ?? 'Unknown domain',
-        clientName: domain?.client ?? '',
+        hostingPlanId,
+        targetName: hostingPlanId ? (plan?.plan_name ?? 'Unknown hosting plan') : (domain?.name ?? 'Unknown domain'),
+        provider: plan?.provider ?? '',
+        clientName: hostingPlanId
+          ? (plan?.client_id && clientNames.get(plan.client_id)) || ''
+          : (domain?.client ?? ''),
         renewalDate: r.renewal_date,
         registrarCost: toNumber(r.registrar_cost),
         clientCharge: toNumber(r.client_charge),

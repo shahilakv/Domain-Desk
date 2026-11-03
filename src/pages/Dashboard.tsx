@@ -65,8 +65,11 @@ export function Dashboard({ domains, renewals, onAddDomain, onViewAllDomains, on
     // Transferred or cancelled domains no longer need renewing.
     const active = domains.filter((d) => d.lifecycle === 'active')
     const byExpiry = [...active].sort(compareByExpiry)
+    // Domain renewals only: this card counts domains, so hosting invoices stay out of its total.
     const outstanding = sumByCurrency(
-      renewals.filter((r) => r.status === 'invoiced').map((r) => ({ amount: r.clientCharge, currency: r.currency })),
+      renewals
+        .filter((r) => r.kind === 'domain' && r.status === 'invoiced')
+        .map((r) => ({ amount: r.clientCharge, currency: r.currency })),
     )
     return {
       stats: {
