@@ -172,7 +172,9 @@ export function HostingPage({ plans, unavailable, onAdd, onEdit, onDelete }: Hos
                           {p.autoRenew ? ' · Auto-renew' : ''}
                         </span>
                       </td>
-                      <td data-label="Client">{p.client || '—'}</td>
+                      <td data-label="Client" className="cell-wrap">
+                        {p.client || '—'}
+                      </td>
                       <td data-label="Domains" className="cell-wrap">
                         {p.domainNames.length === 0
                           ? '—'

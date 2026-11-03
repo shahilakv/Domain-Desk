@@ -923,16 +923,20 @@
 .toolbar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   flex-wrap: wrap;
   gap: 10px;
 }
 
+/* A fixed width (not a percentage) so the toolbar can size itself and keep
+   the filter and search on one line. */
 .search-box {
   position: relative;
   display: flex;
   align-items: center;
   min-width: 0;
-  width: min(320px, 100%);
+  width: 320px;
+  max-width: 100%;
 }
 
 .search-box svg {
@@ -977,9 +981,41 @@
   white-space: nowrap;
 }
 
+/* break-word (not anywhere) so long text wraps at word boundaries instead of
+   letting the table squeeze the column to a few letters. */
 .data-table td.cell-wrap {
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+
+@media (min-width: 1440px) {
+  .data-table td.cell-wrap {
+    min-width: 160px;
+  }
+}
+
+@media (min-width: 1280px) {
+  /* Keep typical client names on one or two lines next to long domain names. */
+  .domain-table td.cell-client {
+    min-width: 104px;
+  }
+
+  /* Tighter gaps between columns; the outer edges keep the card padding. */
+  .domain-table th,
+  .domain-table td {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .domain-table th:first-child,
+  .domain-table td:first-child {
+    padding-left: 28px;
+  }
+
+  .domain-table th:last-child:not(.cell-actions),
+  .domain-table td:last-child:not(.cell-actions) {
+    padding-right: 28px;
+  }
 }
 
 .data-table a {
@@ -1156,13 +1192,28 @@
   outline: none;
 }
 
+/* One chevron for every dropdown, with room so text never runs into it. */
+.select-pill,
+.field select {
+  appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236a6690' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  text-overflow: ellipsis;
+}
+
 .field-hint {
   font-size: 12.5px;
   color: var(--text-muted);
 }
 
+/* Line the checkbox up with the inputs beside it (label height + gap), even
+   when a neighbouring field has a hint underneath. */
 .field-checkbox {
-  justify-content: flex-end;
+  justify-content: flex-start;
+  padding-top: 26px;
 }
 
 .field-checkbox label {
@@ -1243,12 +1294,13 @@
 
 /* ---------- Responsive ---------- */
 
-/* Narrower desktops: tighter cells so expiry + two badges fit without scrolling. */
+/* Narrower desktops: tighter cells so expiry + two badges fit without
+   scrolling under the pinned actions column (which hides the badge ends). */
 @media (max-width: 1439px) {
   .domain-table th,
   .domain-table td {
-    padding-left: 18px;
-    padding-right: 18px;
+    padding-left: 10px;
+    padding-right: 10px;
   }
 
   .domain-table th:first-child,
@@ -1453,7 +1505,8 @@
   }
 
   .domain-table td.cell-actions,
-  .domain-table tbody tr:hover td.cell-actions {
+  .domain-table tbody tr:hover td.cell-actions,
+  .domain-table tbody tr.urgency-urgent td.cell-actions {
     position: absolute;
     top: 8px;
     right: 8px;
@@ -1770,15 +1823,39 @@
     grid-template-columns: 1fr;
   }
 
-  /* Generic tables keep their field labels on phones. */
+  /* Single column: the checkbox no longer sits beside a labelled input. */
+  .field-checkbox {
+    padding-top: 0;
+  }
+
+  .toolbar {
+    justify-content: stretch;
+  }
+
+  /* Generic tables keep their field labels on phones, as a label | value
+     grid so long values wrap in their own column instead of under the label. */
   .data-table td {
     flex-basis: 100%;
     white-space: normal;
   }
 
+  .domain-table.data-table td[data-label] {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    column-gap: 8px;
+    align-items: baseline;
+    justify-items: start;
+  }
+
   .domain-table.data-table td[data-label]::before {
-    display: inline-block;
-    min-width: 76px;
+    display: block;
+    min-width: 0;
+    margin: 0;
+  }
+
+  /* Countdown and date stack in the value column. */
+  .domain-table.data-table td.cell-expiry > * {
+    grid-column: 2;
   }
 
   .edit-button {
